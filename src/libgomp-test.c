@@ -7,7 +7,8 @@
 
     //Original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
     struct Node {
-        int lock; //lock head when adding tasks and queue when stealing
+        omp_lock_t lock_head; //lock head when adding tasks and queue when stealing
+        omp_lock_t lock_tail; //lock tail when one task is stealing
         struct Node* next; // Pointer to next node in DLL
         struct Node* prev; // Pointer to previous node in DLL
         void (*task)(int); // task
@@ -59,8 +60,9 @@
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
         }
+        omp_init_lock(&new_node->lock_head);
+        omp_set_lock(&new_node->lock_head);
         new_node->task=task;
-        new_node->lock=1;
         new_node->prev = NULL;
         if(queue->head==NULL){
             new_node->next = NULL;
@@ -71,8 +73,7 @@
         }
         queue->head = new_node;
         if(queue->head->next!=NULL){ //unset lock of last head, so that it can be stolen
-            #pragma omp atomic write
-            queue->head->next->lock=0;
+            omp_unset_lock(&queue->head->next->lock_head);
         }
         #pragma omp atomic
         queue->list_size = queue->list_size+1;
@@ -96,14 +97,7 @@
                 old_tail = queue->tail;
                 struct Node* helpNode = queue->tail;
                 int stolen_tasks=0;
-                int locked;
                 for(;stolen_tasks<tasks_to_steal && stolen_tasks<list_size;stolen_tasks++){
-                    #pragma omp atomic write
-                        locked = helpNode->lock;
-                    if(locked==1){
-                        helpNode=helpNode->next;
-                        break;
-                    }
                     helpNode=helpNode->prev;
                 }
                 #pragma omp atomic write
@@ -114,6 +108,7 @@
                     queue->tail=helpNode;
                 }
             }
+            omp_unset_lock(&queue->tail->lock_tail);
         }
         while(old_tail!=NULL){
             (* old_tail->task)(input_size); //execute task
@@ -489,8 +484,8 @@
            for(int i=0; i<iteration_end; i++){ // add tasks into local queues
                pushWithLock(local_queue, task_func_ptr);
            }
-           #pragma omp atomic write
-               local_queue->head->lock=0;
+           omp_unset_lock(&local_queue->head->lock_head);
+
            if(local_queue->list_size !=iteration_end){
                printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n", local_queue->list_size, iteration_end);
                exit(EXIT_FAILURE);
