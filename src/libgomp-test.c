@@ -7,7 +7,7 @@
 
     //Original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
     struct Node {
-        int lock; //lock head when adding tasks and tail when stealing
+        int lock; //lock head when adding tasks and queue when stealing
         struct Node* next; // Pointer to next node in DLL
         struct Node* prev; // Pointer to previous node in DLL
         void (*task)(int); // task
@@ -79,8 +79,6 @@
     }
 
     void removeTailWithLock(struct Queue* queue, int input_size){
-        char critical_section[3]; //No more threads than 999 will be executing this program
-        sprintf(critical_section, "%d", queue->index);
         struct Node* old_tail;
         if(queue->list_size!=0)
         #pragma omp critical (critical_section)//Only one task can steal from this queue
@@ -504,8 +502,8 @@
            //STEAL OTHER TASKS - from next
            if(local_queue==global_queue->head_queue){
                 while(global_queue->tail_queue->list_size>1){
-                printf("STEALING prev: %d\n", omp_get_thread_num());
-                   removeTailWithLock(global_queue->tail_queue, input_size);
+                   printf("STEALING prev: %d\n", omp_get_thread_num());
+                    removeTailWithLock(global_queue->tail_queue, input_size);
                 }
            }else{
                while(local_queue->prev_queue->list_size>1){
@@ -515,13 +513,13 @@
            } //steal from prev
            if(local_queue==global_queue->tail_queue){
                while(global_queue->head_queue->list_size>1){
-                               printf("STEALING next: %d\n", omp_get_thread_num());
-                  removeTailWithLock(global_queue->head_queue, input_size);
+                   printf("STEALING next: %d\n", omp_get_thread_num());
+                   removeTailWithLock(global_queue->head_queue, input_size);
                }
            }else{
               while(local_queue->next_queue->list_size>1){
-                              printf("STEALING next: %d\n", omp_get_thread_num());
-                   removeTailWithLock(local_queue->next_queue, input_size);
+                    printf("STEALING next: %d\n", omp_get_thread_num());
+                    removeTailWithLock(local_queue->next_queue, input_size);
               }
            }
           // free(local_queue);
