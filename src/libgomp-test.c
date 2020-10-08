@@ -7,7 +7,7 @@
 
     //Original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
     struct Node {
-        omp_lock_t lock; //lock head when adding tasks and tail when stealing
+        int lock; //lock head when adding tasks and tail when stealing
         struct Node* next; // Pointer to next node in DLL
         struct Node* prev; // Pointer to previous node in DLL
         void (*task)(int); // task
@@ -24,8 +24,8 @@
 
     struct Global_Queue {
             int list_size;
-            struct Queue* head_queue; // Pointer to first queue in DLL
-            struct Queue* tail_queue; // Pointer to last queue in DLL
+            struct Queue* head_queue; // Pointer to first Queue in DLL
+            struct Queue* tail_queue; // Pointer to first Queue in DLL
     };
 
 
@@ -50,6 +50,77 @@
         queue->head = new_node;
         queue->list_size = queue->list_size+1;
         //printf("%d\n", queue->list_size);
+    }
+
+
+    void pushWithLock(struct Queue* queue, void (*task)(int)){
+        struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
+        if( new_node == NULL ) {
+            printf("malloc failed - Not enough memory");
+            exit(EXIT_FAILURE);
+        }
+        new_node->task=task;
+        new_node->lock=1;
+        new_node->prev = NULL;
+        if(queue->head==NULL){
+            new_node->next = NULL;
+            queue->tail = new_node;
+        }else{
+            (queue->head)->prev = new_node;
+            new_node->next = queue->head;
+        }
+        queue->head = new_node;
+        if(queue->head->next!=NULL){ //unset lock of last head, so that it can be stolen
+            #pragma omp atomic write
+            queue->head->next->lock=0;
+        }
+        #pragma omp atomic
+        queue->list_size = queue->list_size+1;
+    }
+
+    void removeTailWithLock(struct Queue* queue, int input_size){
+        char critical_section[3]; //No more threads than 999 will be executing this program
+        sprintf(critical_section, "%d", queue->index);
+        struct Node* old_tail;
+        if(queue->list_size!=0)
+        #pragma omp critical (critical_section)//Only one task can steal from this queue
+        {
+            int list_size;
+            #pragma omp atomic read
+                list_size=queue->list_size;
+            if(list_size!=0){
+                int tasks_to_steal;
+                if(list_size>5){
+                    tasks_to_steal = list_size/2;
+                }else{
+                    tasks_to_steal=list_size;
+                }
+                old_tail = queue->tail;
+                struct Node* helpNode = queue->tail;
+                int stolen_tasks=0;
+                int locked;
+                for(;stolen_tasks<tasks_to_steal && stolen_tasks<list_size;stolen_tasks++){
+                    #pragma omp atomic write
+                        locked = helpNode->lock;
+                    if(locked==1){
+                        helpNode=helpNode->next;
+                        break;
+                    }
+                    helpNode=helpNode->prev;
+                }
+                #pragma omp atomic write
+                queue->list_size = (queue->list_size)-stolen_tasks;
+                if(queue->list_size!=0){
+                    helpNode->next->prev=NULL; //disconnect both
+                    helpNode->next=NULL;
+                    queue->tail=helpNode;
+                }
+            }
+        }
+        while(old_tail!=NULL){
+            (* old_tail->task)(input_size); //execute task
+            old_tail=old_tail->prev;
+        }
     }
 
     void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue){
@@ -90,7 +161,6 @@
         printf("\nElements:%d \n", count);
     }
 
-    //Vector functions from (184.710)
     //Original function is taken from Parallel Computing (184.710)
     void fill_vector(double* m, int n) {
         for(int i=0; i<n; i++) {
@@ -116,6 +186,7 @@
     }
 
     //Matrix functions from (184.710)
+
     //Original function is taken from Parallel Computing (184.710)
     void fill_2d_matrix(double** m, int n) {
         for(int i=0; i<n; i++) {
@@ -321,7 +392,7 @@
                 if(queue->list_size!=tasks){
                     printf("Not all tasks have been added correctly in pattern1: %d should be %d", queue->list_size, tasks);
                     exit(EXIT_FAILURE);
-                }
+                }//else printf("CORRECT: %d should be %d\n", queue->list_size, tasks);
             }
             #pragma omp for
             for (int i=0;i<tasks;i++){
@@ -346,7 +417,7 @@
             pattern1WithoutWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
         }else if (e==2){
             //work stealing
-            //pattern1WithWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
+            pattern1WithoutWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
         }else{
             exit(EXIT_FAILURE);
         }
@@ -361,7 +432,7 @@
             head_next = head_next->next;
             (* currentNode->task)(input_size); //execute task
             queue->list_size=queue->list_size-1;
-            free(currentNode);
+            free(currentNode); //Problem globale queue - pointer auf letzten setzen
         }
     }
 
@@ -396,18 +467,78 @@
         }
     }
 
+//ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
+    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e, int steal_size){
+       #pragma omp parallel num_threads(p)
+       {
+           int rank=omp_get_thread_num();
+           struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
+           testQueueMemory(local_queue);
+           init_queue(local_queue);
+           #pragma omp for ordered  //add local queues into global one
+               for (int i=0; i<p; i++) {
+                   #pragma omp ordered
+                   {  //printf("Rank: %d\n", rank);
+                      pushQueue(global_queue, local_queue);
+                      local_queue->index=i;
+                   }
+               }
+           if(global_queue->list_size!=p){
+               printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n", global_queue->list_size, p);
+               exit(EXIT_FAILURE);
+           }
+           int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
+           for(int i=0; i<iteration_end; i++){ // add tasks into local queues
+               pushWithLock(local_queue, task_func_ptr);
+           }
+           #pragma omp atomic write
+               local_queue->head->lock=0;
+           if(local_queue->list_size !=iteration_end){
+               printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n", local_queue->list_size, iteration_end);
+               exit(EXIT_FAILURE);
+           }
+           //start executing and stealing
+           while(local_queue->list_size>0){
+                removeTailWithLock(local_queue, input_size);
+           }
+           //STEAL OTHER TASKS - from next
+           if(local_queue==global_queue->head_queue){
+                while(global_queue->tail_queue->list_size>1){
+                printf("STEALING prev: %d\n", omp_get_thread_num());
+                   removeTailWithLock(global_queue->tail_queue, input_size);
+                }
+           }else{
+               while(local_queue->prev_queue->list_size>1){
+                    printf("STEALING prev: %d\n", omp_get_thread_num());
+                    removeTailWithLock(local_queue->prev_queue, input_size);
+               }
+           } //steal from prev
+           if(local_queue==global_queue->tail_queue){
+               while(global_queue->head_queue->list_size>1){
+                               printf("STEALING next: %d\n", omp_get_thread_num());
+                  removeTailWithLock(global_queue->head_queue, input_size);
+               }
+           }else{
+              while(local_queue->next_queue->list_size>1){
+                              printf("STEALING next: %d\n", omp_get_thread_num());
+                   removeTailWithLock(local_queue->next_queue, input_size);
+              }
+           }
+          // free(local_queue);
+        }
+    }
+
 //local queues
     void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
             if(e==1){ //No work stealing
                 pattern2WithoutWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e);
             }else if (e==2){ //Random selection - select one - threashhold...
-               // pattern2WithWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e, 10);
+                pattern2WithWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e, 10);
             }else{
                 exit(EXIT_FAILURE);
             }
     }
 
-//TODO: Read paper and implement correctly
     void pattern3(struct Queue* queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
         if (tasks < 1){
             struct Node* head_next= queue->head;
@@ -521,5 +652,6 @@
         }else{
             exit(EXIT_FAILURE);
         }
+
         execute_program(task_func_ptr, create, type, m, n, execute, p, rep);
     }
