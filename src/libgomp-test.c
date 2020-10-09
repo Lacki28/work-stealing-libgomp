@@ -1,6 +1,6 @@
     #include <omp.h>
     #include <stdio.h>
-    #include <stdlib.h>    /* for exit */
+    #include <stdlib.h>
     #include <getopt.h>
     #include <stdint.h>
     #include <string.h>
@@ -16,7 +16,6 @@
 
     struct Queue {
         int list_size;
-        int index;
         struct Node* head; // Pointer to first node in DLL
         struct Node* tail; //  Pointer to last node in DLL
         struct Queue* next_queue; // Only used in global queues
@@ -81,9 +80,7 @@
 
     void removeTailWithLock(struct Queue* queue, int input_size){
         struct Node* old_tail;
-        if(queue->list_size!=0)
-        #pragma omp critical (critical_section)//Only one task can steal from this queue
-        {
+        if(queue->list_size!=0 && omp_test_lock(&queue->tail->lock_tail)){
             int list_size;
             #pragma omp atomic read
                 list_size=queue->list_size;
@@ -408,8 +405,7 @@
     void pattern1(struct Queue* queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
         if(e==1){ //No work stealing
             pattern1WithoutWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
-        }else if (e==2){
-            //work stealing
+        }else if (e==2){ //work stealing
             pattern1WithoutWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
         }else{
             exit(EXIT_FAILURE);
@@ -460,7 +456,6 @@
         }
     }
 
-//ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
     void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e, int steal_size){
        #pragma omp parallel num_threads(p)
        {
@@ -468,12 +463,11 @@
            struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
            testQueueMemory(local_queue);
            init_queue(local_queue);
-           #pragma omp for ordered  //add local queues into global one
+           #pragma omp for ordered  //add local queues into global
                for (int i=0; i<p; i++) {
                    #pragma omp ordered
                    {  //printf("Rank: %d\n", rank);
                       pushQueue(global_queue, local_queue);
-                      local_queue->index=i;
                    }
                }
            if(global_queue->list_size!=p){
@@ -525,7 +519,7 @@
     void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
             if(e==1){ //No work stealing
                 pattern2WithoutWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e);
-            }else if (e==2){ //Random selection - select one - threashhold...
+            }else if (e==2){ //Random selection - select one - threshold...
                 pattern2WithWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e, 10);
             }else{
                 exit(EXIT_FAILURE);
@@ -605,13 +599,13 @@
         int execute = -1;
         int rep=-1;
         if(argc!=15){
-            printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x");
+            printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x");
             exit(EXIT_FAILURE);
         }
         for(int i=1; i<argc; i+=2){
             char* arg = argv[i];
             if(atoi(argv[i+1])==0){
-                printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x, parameters must be > 1");
+                printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x, parameters must be > 1");
                 exit(EXIT_FAILURE);
             }
             if(strcmp(arg, "-p")==0){
@@ -630,7 +624,7 @@
                 rep = atoi(argv[i+1]);
             }else{
                 printf("\n|%s|\n", arg);
-                printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x");
+                printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x");
                 exit(EXIT_FAILURE);
             }
         }
