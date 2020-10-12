@@ -7,7 +7,7 @@
 
     //Original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
     struct Node {
-        int lock; //lock head when adding tasks and queue when stealing
+        int lock; //lock head when adding tasks and tail when stealing - 0=unlocked, 1=head, >1=rank of lock-2 has lock
         struct Node* next; // Pointer to next node in DLL
         struct Node* prev; // Pointer to previous node in DLL
         void (*task)(int); // task
@@ -587,7 +587,7 @@
                 init_queue(queue);
                 pattern1 (queue, task_func_ptr, type, m, n, p, execute);
                 free(queue);
-            }else if(create==2){
+            }else if(create==2){ //TODO: threshold
                 struct Global_Queue* queue = (struct Global_Queue*)malloc(sizeof(struct Global_Queue));
                 if( queue == NULL ) {
                     printf("malloc failed - Not enough memory");
