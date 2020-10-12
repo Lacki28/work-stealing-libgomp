@@ -1,14 +1,13 @@
     #include <omp.h>
     #include <stdio.h>
-    #include <stdlib.h>
+    #include <stdlib.h>    /* for exit */
     #include <getopt.h>
     #include <stdint.h>
     #include <string.h>
 
     //Original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
     struct Node {
-        omp_lock_t lock_head; //lock head when adding tasks and queue when stealing
-        omp_lock_t lock_tail; //lock tail when one task is stealing
+        int lock; //lock head when adding tasks and queue when stealing
         struct Node* next; // Pointer to next node in DLL
         struct Node* prev; // Pointer to previous node in DLL
         void (*task)(int); // task
@@ -59,9 +58,8 @@
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
         }
-        omp_init_lock(&new_node->lock_head);
-        omp_set_lock(&new_node->lock_head);
         new_node->task=task;
+        new_node->lock=1;
         new_node->prev = NULL;
         if(queue->head==NULL){
             new_node->next = NULL;
@@ -72,45 +70,61 @@
         }
         queue->head = new_node;
         if(queue->head->next!=NULL){ //unset lock of last head, so that it can be stolen
-            omp_unset_lock(&queue->head->next->lock_head);
+            #pragma omp atomic write
+            queue->head->next->lock=0;
         }
-        #pragma omp atomic
+        #pragma omp atomic update
         queue->list_size = queue->list_size+1;
     }
 
     void removeTailWithLock(struct Queue* queue, int input_size){
-        struct Node* old_tail;
-        if(queue->list_size!=0 && omp_test_lock(&queue->tail->lock_tail)){
+        #pragma omp critical//Only one task can steal from this queue
+        {
+            if(queue->tail->lock==0){
+                queue->tail->lock=omp_get_thread_num()+2;
+            }
+        }
+        if(queue->tail->lock==omp_get_thread_num()+2){
             int list_size;
             #pragma omp atomic read
                 list_size=queue->list_size;
             if(list_size!=0){
                 int tasks_to_steal;
-                if(list_size>5){
+                if(list_size>8){
                     tasks_to_steal = list_size/2;
                 }else{
                     tasks_to_steal=list_size;
                 }
-                old_tail = queue->tail;
+                struct Node* old_tail = queue->tail;
                 struct Node* helpNode = queue->tail;
                 int stolen_tasks=0;
+                int locked;
                 for(;stolen_tasks<tasks_to_steal && stolen_tasks<list_size;stolen_tasks++){
+                    #pragma omp atomic write
+                        locked = helpNode->lock;
+                    if(locked==1){
+                        helpNode=helpNode->next;
+                        break;
+                    }
                     helpNode=helpNode->prev;
                 }
-                #pragma omp atomic write
+                #pragma omp atomic
                 queue->list_size = (queue->list_size)-stolen_tasks;
                 if(queue->list_size!=0){
                     helpNode->next->prev=NULL; //disconnect both
                     helpNode->next=NULL;
                     queue->tail=helpNode;
                 }
+                #pragma omp atomic write
+                    queue->tail->lock=0;
+                while(old_tail!=NULL){
+                    (* old_tail->task)(input_size); //execute task
+                    old_tail=old_tail->prev;
+                }
             }
-            omp_unset_lock(&queue->tail->lock_tail);
+
         }
-        while(old_tail!=NULL){
-            (* old_tail->task)(input_size); //execute task
-            old_tail=old_tail->prev;
-        }
+
     }
 
     void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue){
@@ -405,7 +419,8 @@
     void pattern1(struct Queue* queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
         if(e==1){ //No work stealing
             pattern1WithoutWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
-        }else if (e==2){ //work stealing
+        }else if (e==2){
+            //work stealing
             pattern1WithoutWorkStealing(queue, task_func_ptr, type, tasks, input_size, p, e);
         }else{
             exit(EXIT_FAILURE);
@@ -456,14 +471,15 @@
         }
     }
 
-    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e, int steal_size){
+//ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
+    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
        #pragma omp parallel num_threads(p)
        {
            int rank=omp_get_thread_num();
            struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
            testQueueMemory(local_queue);
            init_queue(local_queue);
-           #pragma omp for ordered  //add local queues into global
+           #pragma omp for ordered  //add local queues into global one
                for (int i=0; i<p; i++) {
                    #pragma omp ordered
                    {  //printf("Rank: %d\n", rank);
@@ -478,8 +494,10 @@
            for(int i=0; i<iteration_end; i++){ // add tasks into local queues
                pushWithLock(local_queue, task_func_ptr);
            }
-           omp_unset_lock(&local_queue->head->lock_head);
-
+           if(iteration_end!=0){
+               #pragma omp atomic write
+                   local_queue->head->lock=0;
+           }
            if(local_queue->list_size !=iteration_end){
                printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n", local_queue->list_size, iteration_end);
                exit(EXIT_FAILURE);
@@ -511,16 +529,16 @@
                     removeTailWithLock(local_queue->next_queue, input_size);
               }
            }
-          // free(local_queue);
+           free(local_queue);
         }
     }
 
 //local queues
-    void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e){
+    void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int type, int tasks, int input_size, int p, int e, int i){
             if(e==1){ //No work stealing
                 pattern2WithoutWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e);
-            }else if (e==2){ //Random selection - select one - threshold...
-                pattern2WithWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e, 10);
+            }else if (e==2){ //Random selection - select one - threashhold...
+                pattern2WithWorkStealing(global_queue, task_func_ptr, type, tasks, input_size, p, e);
             }else{
                 exit(EXIT_FAILURE);
             }
@@ -576,7 +594,7 @@
                     exit(EXIT_FAILURE);
                 }
                 init_global_queue(queue);
-                pattern2 (queue, task_func_ptr, type, m, n, p, execute);
+                pattern2 (queue, task_func_ptr, type, m, n, p, execute, i);
                 free(queue);
             }else if(create==3){
                // pattern3 (queue, task_func_ptr, type, m, n, p, execute);
@@ -599,13 +617,13 @@
         int execute = -1;
         int rep=-1;
         if(argc!=15){
-            printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x");
+            printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x");
             exit(EXIT_FAILURE);
         }
         for(int i=1; i<argc; i+=2){
             char* arg = argv[i];
             if(atoi(argv[i+1])==0){
-                printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x, parameters must be > 1");
+                printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x, parameters must be > 1");
                 exit(EXIT_FAILURE);
             }
             if(strcmp(arg, "-p")==0){
@@ -624,7 +642,7 @@
                 rep = atoi(argv[i+1]);
             }else{
                 printf("\n|%s|\n", arg);
-                printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x");
+                printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x");
                 exit(EXIT_FAILURE);
             }
         }
