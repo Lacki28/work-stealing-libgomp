@@ -16,7 +16,7 @@
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
     */
-    void push(struct Queue* queue, void (*task)(int)){
+    void push(struct Queue* queue, void (*task)(int, Parameters*)){
         struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
         if( new_node == NULL ) {
             printf("malloc failed - Not enough memory");
@@ -42,7 +42,7 @@
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
     */
-    void pushWithLock(struct Queue* queue, void (*task)(int)){
+    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*)){
         struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
         if( new_node == NULL ) {
             printf("malloc failed - Not enough memory");
@@ -73,7 +73,7 @@
         * @param queue queue from which the nodes are taken
         * @param input_size parameter for executing tasks
     */
-    void removeTailWithLock(struct Queue* queue, int input_size){
+    void removeTailWithLock(struct Queue* queue, int input_size, struct Parameters* parameters){
         #pragma omp critical//Only one task can steal from this queue
         {
             if(queue->tail->lock==0){
@@ -114,7 +114,7 @@
                 #pragma omp atomic write
                     queue->tail->lock=0;
                 while(old_tail!=NULL){
-                    (* old_tail->task)(input_size); //execute task
+                    (* old_tail->task)(input_size, parameters); //execute task
                     old_tail=old_tail->prev;
                 }
             }

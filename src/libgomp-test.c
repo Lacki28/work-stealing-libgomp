@@ -9,6 +9,19 @@
     * @details the program creates four child processes, which then recursively do the calculation of the two numbers.
     */
 
+
+    /**
+        * @brief initialize parameters
+        * @param params parameters to initialize
+    */
+    void init_parameters(struct Parameters* params){
+        params->A = NULL;
+        params->B = NULL;
+        params->C = NULL;
+        params->start = 0;
+        params->end=0;
+    }
+
      /**
         * @brief fill vector with double 1.0
         * @source original structure taken from Parallel Computing (184.710)
@@ -34,135 +47,63 @@
     }
 
      /**
-        * @brief fill matrix with double 1.0
-        * @source original structure taken from Parallel Computing (184.710)
-        * @param m matrix to fill
-        * @param n size of the square matrix
+        * @brief test if malloc() did not fail
+        * @param A pointer to vector that has been created
+        * @param B pointer to vector that has been created
+        * @param C pointer to vector that has been created
+        * @param parameters struct that has been created
     */
-    void fill_2d_matrix(double** m, int n) {
-        for(int i=0; i<n; i++) {
-          for(int j=0; j<n; j++) {
-            m[i][j] = 1.0;
-          }
-        }
-    }
-
-    /**
-        * @brief create a new matrix with elements double 1.0
-        * @source original structure taken from Parallel Computing (184.710) and http://c-faq.com/aryptr/dynmuldimary.html
-        * @param m matrix to fill
-        * @param n size of the square matrix
-    */
-    int create_2d_matrix(double*** m, int n) {
-        *m = (double**)malloc(n * sizeof(double*));
-        if(m == NULL) {
+    void testTaskParamMemory(double *A, double *B, double *C, struct Parameters* parameters){
+        if( A == NULL || B == NULL || C == NULL || parameters) {
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
-        } else {
-            int i;
-            for(i=0; i<n; i++) {
-                double *array = (double*)malloc(n * n * sizeof(double));
-                if(array == NULL) {
-                    printf("malloc failed - Not enough memory");
-                    exit(EXIT_FAILURE);
-                }
-                (*m)[i] = array;
-            }
         }
-        fill_2d_matrix(*m, n);
-        return 0;
     }
 
-    /**
-        * @brief free matrix
-        * @source original structure taken from Parallel Computing (184.710)
-        * @param m matrix to free
-    */
-    int free_2d_matrix(double** m) {
-        if(m != NULL) {
-          free(m[0]);
-          free(m);
-        }
-        return 0;
-    }
-
-    //TASKS
+//TASKS
 
     /**
         * @brief addition of two vectors
         * @source original function is taken from https://riptutorial.com/openmp/example/23425/addition-of-two-vectors-using-openmp-parallel-for-construct
         * @param n size of the vectors
-    */
-    void vectorVectorSum (int n){
-        double *A = (double*)malloc(n * sizeof(double));
-        double *B = (double*)malloc(n * sizeof(double));
-        double *C = (double*)malloc(n * sizeof(double));
-        if( A == NULL || B == NULL || C == NULL) {
-            printf("malloc failed - Not enough memory");
-            exit(EXIT_FAILURE);
-        }
-        fill_vector(A, n);
-        fill_vector(B, n);
-        fill_vector(C, n);
+        * @param parameters struct with all details needed for execution of the task
+     */
+    void vectorVectorSum (int n, struct Parameters* parameters){
         for (int i = 0; i < n; ++i){
-            C[i] = A[i] + B[i];
+            parameters->C[i] = parameters->A[i] + parameters->B[i];
         }
-        free_vector(A);
-        free_vector(B);
-        free_vector(C);
     }
 
     /**
         * @brief multiplication of a matrix with a vector
         * @source original function is taken from https://www.appentra.com/parallel-computation-of-matrix-vector-product/
         * @param n size of the vector and the square matrix
+        * @param parameters struct with all details needed for execution of the task
     */
-    void matrixVectorProduct (int n){
-        double *V = (double*)malloc(n * sizeof(double));
-        fill_vector(V, n);
-        double *result = (double*)malloc(n * sizeof(double));
-        fill_vector(result, n);
-        if(V == NULL || result == NULL) {
-            printf("malloc failed - Not enough memory");
-            exit(EXIT_FAILURE);
-        }
-        double **M;
-        create_2d_matrix(&M, n);
+    void matrixVectorProduct (int n, struct Parameters* parameters){
         for(int i=0;i<n;i++) {
-          result[i]=0;
+          parameters->C[i]=0;
           for(int j=0;j<n;j++) {
-              result[i] += M[i][j]*V[j];
+              parameters->C[i] += parameters->B[i*n+j]*parameters->A[j];
           }
         }
-        free_vector(V);
-        free_2d_matrix(M);
-        free_vector(result);
     }
 
     /**
         * @brief multiplication of two matrices
         * @source original function is taken from https://www.appentra.com/parallel-matrix-matrix-multiplication/
         * @param n size of the square matrices
+        * @param parameters struct with all details needed for execution of the task
     */
-    void matrixMatrixProduct(int n){
-        double **M1;
-        create_2d_matrix(&M1, n);
-        double **M2;
-        create_2d_matrix(&M2, n);
-        double **result;
-        create_2d_matrix(&result, n);
+    void matrixMatrixProduct(int n, struct Parameters* parameters){
         for (int i=0; i<n; i=i+1){
             for (int j=0; j<n; j=j+1){
-                 result[i][j]=0.;
+                 parameters->C[i*n+j]=0.;
                  for (int k=0; k<n; k=k+1){
-                    result[i][j]+=(M1[i][k])*(M2[k][j]);
+                    parameters->C[i*n+j]+=(parameters->A[i*n+k])*(parameters->B[k*n+j]);
                  }
             }
         }
-        free_2d_matrix(M1);
-        free_2d_matrix(M2);
-        free_2d_matrix(result);
-
     }
 
     /**
@@ -177,7 +118,8 @@
     }
 
     //TODO: Doc
-    void pattern1WithoutWorkStealing(struct Queue* queue, void (*task_func_ptr)(int), int tasks, int input_size, int p, int e){
+    void pattern1WithoutWorkStealing(struct Queue* queue, void (*task_func_ptr)(int, Parameters*), int tasks,
+                                     int input_size, int p, int e, struct Parameters* parameters){
         struct Node* head_next;
         #pragma omp parallel num_threads(p)
         {
@@ -206,7 +148,7 @@
                 }
                 #pragma omp atomic
                     queue->list_size=queue->list_size-1;
-                (* currentNode->task)(input_size); //execute task
+                (* currentNode->task)(input_size, parameters); //execute task
                 free(currentNode);
             }
         }
@@ -221,13 +163,14 @@
         * @param input_size input for each task
         * @param p amount of threads that execute the program
         * @param e specify whether work stealing is used
+        * @param parameters input for the tasks
     */
-    void pattern1(struct Queue* queue, void (*task_func_ptr)(int), int tasks, int input_size, int p, int e){
+    void pattern1(struct Queue* queue, void (*task_func_ptr)(int, Parameters*), int tasks, int input_size, int p, int e, struct Parameters* parameters){
         if(e==1){ //No work stealing
-            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e);
+            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e, parameters);
         }else if (e==2){
             //work stealing
-            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e);
+            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e, parameters);
         }else{
             exit(EXIT_FAILURE);
         }
@@ -240,21 +183,23 @@
         * @param queue where the tasks are saved
         * @param iteration_end amount of tasks to be executed
         * @param input_size parameter for tasks
+        * @param parameters input for the tasks
     */
-    void executeTasks(struct Queue* queue, int iteration_end, int input_size){
+    void executeTasks(struct Queue* queue, int iteration_end, int input_size, struct Parameters* parameters){
         struct Node* head_next = queue->head;
         for (int i=0;i<iteration_end;i++){
             struct Node* currentNode;
             currentNode = head_next;
             head_next = head_next->next;
-            (* currentNode->task)(input_size); //execute task
+            (* currentNode->task)(input_size, parameters); //execute task
             queue->list_size=queue->list_size-1;
             free(currentNode);
         }
     }
 
     //TODO: Doc
-    void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int tasks, int input_size, int p, int e){
+    void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*),
+                                    int tasks, int input_size, int p, int e, struct Parameters* parameters){
         #pragma omp parallel num_threads(p)
         {
             int rank = omp_get_thread_num();
@@ -280,13 +225,14 @@
                 printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n", local_queue->list_size, iteration_end);
                 exit(EXIT_FAILURE);
             }
-            executeTasks(local_queue, iteration_end, input_size);
+            executeTasks(local_queue, iteration_end, input_size, parameters);
             free(local_queue);
         }
     }
 
     //TODO: Doc, teilen und übersichtlicher machen + ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
-    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int tasks, int input_size, int p, int e){
+    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*),
+                                    int tasks, int input_size, int p, int e, struct Parameters* parameters){
        #pragma omp parallel num_threads(p)
        {
            int rank=omp_get_thread_num();
@@ -318,29 +264,29 @@
            }
            //start executing and stealing
            while(local_queue->list_size>0){
-                removeTailWithLock(local_queue, input_size);
+                removeTailWithLock(local_queue, input_size, parameters);
            }
            //STEAL OTHER TASKS - from next
            if(local_queue==global_queue->head_queue){
                 while(global_queue->tail_queue->list_size>1){
                    printf("STEALING prev: %d\n", omp_get_thread_num());
-                    removeTailWithLock(global_queue->tail_queue, input_size);
+                    removeTailWithLock(global_queue->tail_queue, input_size, parameters);
                 }
            }else{
                while(local_queue->prev_queue->list_size>1){
                     printf("STEALING prev: %d\n", omp_get_thread_num());
-                    removeTailWithLock(local_queue->prev_queue, input_size);
+                    removeTailWithLock(local_queue->prev_queue, input_size, parameters);
                }
            } //steal from prev
            if(local_queue==global_queue->tail_queue){
                while(global_queue->head_queue->list_size>1){
                    printf("STEALING next: %d\n", omp_get_thread_num());
-                   removeTailWithLock(global_queue->head_queue, input_size);
+                   removeTailWithLock(global_queue->head_queue, input_size, parameters);
                }
            }else{
               while(local_queue->next_queue->list_size>1){
                     printf("STEALING next: %d\n", omp_get_thread_num());
-                    removeTailWithLock(local_queue->next_queue, input_size);
+                    removeTailWithLock(local_queue->next_queue, input_size, parameters);
               }
            }
            free(local_queue);
@@ -356,19 +302,20 @@
         * @param input_size input for each task
         * @param p amount of threads that execute the program
         * @param e specify whether work stealing is used
+        * @param parameters input for the tasks
     */
-    void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int), int tasks, int input_size, int p, int e){
+    void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*), int tasks, int input_size, int p, int e, struct Parameters* parameters){
             if(e==1){ //No work stealing
-                pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e);
+                pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e, parameters);
             }else if (e==2){ //Random selection - select one - threashhold...
-                pattern2WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e);
+                pattern2WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e, parameters);
             }else{
                 exit(EXIT_FAILURE);
             }
     }
 
     //TODO: Doc + implement dynamic creation of tasks as discussed in last meeting
-    void pattern3(struct Queue* queue, void (*task_func_ptr)(int), int tasks, int input_size, int p, int e){
+    void pattern3(struct Queue* queue, void (*task_func_ptr)(int, Parameters*), int tasks, int input_size, int p, int e, struct Parameters* parameters){
         if (tasks < 1){
             struct Node* head_next= queue->head;
             #pragma omp for
@@ -380,7 +327,7 @@
                     head_next = head_next->next;
                     queue->list_size=queue->list_size-1;
                 }
-                (* currentNode->task)(input_size); //execute task
+                (* currentNode->task)(input_size, parameters); //execute task
             }
             return;
         }
@@ -393,7 +340,7 @@
                         if(tasks>0){
                             tasks--;
                             push(queue, task_func_ptr);
-                            pattern3(queue, task_func_ptr, tasks, input_size, p, e);
+                            pattern3(queue, task_func_ptr, tasks, input_size, p, e, parameters);
                         }
                     }
                 }
@@ -411,8 +358,9 @@
         * @param execute specify whether work stealing is used
         * @param p amount of threads that execute the program
         * @param rep how often the program is executed
+        * @param parameters input for the tasks
     */
-    void execute_program(void (*task_func_ptr)(int), int create, int m, int n, int execute, int p, int rep){
+    void executeProgram(void (*task_func_ptr)(int, Parameters*), int create, int m, int n, int execute, int p, int rep, struct Parameters* parameters){
         double mean=0;
         for(int i=0; i<rep; i++){
             double start_time = omp_get_wtime();
@@ -420,7 +368,7 @@
                 struct Queue* queue = (struct Queue*)malloc(sizeof(struct Queue));
                 testQueueMemory(queue);
                 init_queue(queue);
-                pattern1 (queue, task_func_ptr, m, n, p, execute);
+                pattern1 (queue, task_func_ptr, m, n, p, execute, parameters);
                 free(queue);
             }else if(create==2){ //TODO: threshold
                 struct Global_Queue* queue = (struct Global_Queue*)malloc(sizeof(struct Global_Queue));
@@ -429,10 +377,10 @@
                     exit(EXIT_FAILURE);
                 }
                 init_global_queue(queue);
-                pattern2 (queue, task_func_ptr, m, n, p, execute);
+                pattern2 (queue, task_func_ptr, m, n, p, execute, parameters);
                 free(queue);
             }else if(create==3){
-               // pattern3 (queue, task_func_ptr, m, n, p, execute);
+               // pattern3 (queue, task_func_ptr, m, n, p, execute, parameters);
             }else{
                 exit(EXIT_FAILURE);
             }
@@ -442,6 +390,57 @@
         printf("Done in an average time of: %f\n", (mean/rep));
     }
 
+     /**
+        * @brief create parameters for the program and execute it
+        * @param task_func_ptr pointer to the task that will be stored in the nodes
+        * @param create specify which pattern will be used
+        * @param m amount of tasks that have to be executed
+        * @param n input for each task
+        * @param execute specify whether work stealing is used
+        * @param p amount of threads that execute the program
+        * @param rep how often the program is executed
+        * @param type kind of task
+    */
+    void createParametersForProgramAndExecute(int create, int m, int n, int execute, int p, int rep, int type) {
+        //Create task pointer here and input Params
+        void (*task_func_ptr)(int, Parameters*);
+        int A_size=0;
+        int B_size=0;
+        int C_size=0;
+        if(type==1){
+            task_func_ptr =  &vectorVectorSum;
+            A_size=n*p;
+            B_size=n*p;
+            C_size=n*p;
+        }else if(type==2){
+            task_func_ptr = &matrixVectorProduct;
+            A_size=n*p;
+            B_size=n*n*p*p;
+            C_size=n*p;
+        }else if(type==3){
+            task_func_ptr = &matrixMatrixProduct;
+            A_size=n*n*p*p;
+            B_size=n*n*p*p;
+            C_size=n*n*p*p;
+        }else{
+            exit(EXIT_FAILURE);
+        }
+        double *A=(double*)malloc(A_size * sizeof(double));
+        double *B=(double*)malloc(B_size * sizeof(double));
+        double *C=(double*)malloc(C_size * sizeof(double));
+        struct Parameters* parameters = (struct Parameters*)malloc(sizeof(struct Parameters));
+        testTaskParamMemory(A,B,C, parameters);
+        init_parameters(parameters);
+        fill_vector(A, A_size);
+        fill_vector(B, B_size);
+        parameters->A=A;
+        parameters->B=B;
+        parameters->C=C;
+        executeProgram(task_func_ptr, create, m, n, execute, p, rep, parameters);
+        free_vector(A);
+        free_vector(B);
+        free_vector(C);
+    }
      /**
         * @brief check parameters and start executing the program
         * @details exit with failure if one parameter is incorrect
@@ -487,17 +486,5 @@
                 exit(EXIT_FAILURE);
             }
         }
-        //Create task pointer here
-       void (*task_func_ptr)(int);
-        if(type==1){
-            task_func_ptr =  &vectorVectorSum;
-        }else if(type==2){
-            task_func_ptr = &matrixVectorProduct;
-        }else if(type==3){
-            task_func_ptr = &matrixMatrixProduct;
-        }else{
-            exit(EXIT_FAILURE);
-        }
-
-        execute_program(task_func_ptr, create, m, n, execute, p, rep);
+        createParametersForProgramAndExecute(create, m, n, execute, p, rep, type);
     }

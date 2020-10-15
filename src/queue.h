@@ -4,6 +4,7 @@
     #include <getopt.h>
     #include <stdint.h>
     #include <string.h>
+
     /**
        * @file queue.h
        * @author Anna Lackinger 11776842
@@ -11,6 +12,9 @@
        * @brief  header file for queue.c
        * @details this file consists of the structure and methods for the queue
     */
+
+    struct Parameters;
+    typedef struct Parameters  Parameters;
 
     /**
         * @brief elements of the queue
@@ -26,7 +30,24 @@
         int lock;
         struct Node* next;
         struct Node* prev;
-        void (*task)(int);
+        void (*task)(int, Parameters*);
+    };
+
+     /**
+        * @brief parameters for the tasks
+        * @details use a struct for the parameters to allocate enough memory before executing the tasks
+        * @element A pointer to vector or matrix
+        * @element B pointer to vector or matrix
+        * @element C pointer to vector or matrix - result of A (operation) B
+        * @element start pointer to the beginning of the address, for a thread
+        * @element end pointer to the end of the address, for a thread
+    */
+    struct Parameters {
+        double *A;
+        double *B;
+        double *C;
+        int start;
+        int end;
     };
 
     /**
@@ -60,27 +81,10 @@
         struct Queue* tail_queue;
     };
 
-    /**
-        * @brief parameters for the tasks
-        * @details use a struct for the parameters to allocate enough memory before executing the tasks
-        * @element A pointer to vector or matrix
-        * @element B pointer to vector or matrix
-        * @element C pointer to vector or matrix - result of A (operation) B
-        * @element start pointer to the beginning of the address, for a thread
-        * @element end pointer to the end of the address, for a thread
-    */
-    struct Params {
-        double *A;
-        double *B;
-        double *C;
-        int start;
-        int end;
-    };
-
     //Description can be found in queue.c
-    void push(struct Queue* queue, void (*task)(int));
-    void pushWithLock(struct Queue* queue, void (*task)(int));
-    void removeTailWithLock(struct Queue* queue, int input_size);
+    void push(struct Queue* queue, void (*task)(int, Parameters*));
+    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*));
+    void removeTailWithLock(struct Queue* queue, int input_size, struct Parameters* parameters);
     void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue);
     void init_queue(struct Queue* queue);
     void init_global_queue(struct Global_Queue* queue);
