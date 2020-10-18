@@ -9,6 +9,10 @@
     * @details the program creates four child processes, which then recursively do the calculation of the two numbers.
     */
 
+    /**
+        * @brief test if threads execute the tasks correctly
+    */
+    int test_tasks;
 
     /**
         * @brief initialize parameters
@@ -21,6 +25,24 @@
         params->start = 0;
         params->end=0;
     }
+
+    /**
+        * @brief calculate the start and end address for each thread
+        * @param iteration_end amount of tasks one thread has to execute
+        * @param rank id of the thread
+        * @param tasks amount of tasks that have to be executed
+        * @param p number of threads
+        * @param n input size for the tasks
+    */
+    void calculateStartAndEndForParams(struct Parameters* parameters, int iteration_end, int rank, int tasks, int p, int n){
+            if((tasks%p)>rank){
+                parameters->start=rank*n/p+rank;
+            }
+            else{
+                parameters->start=rank*n/p+tasks%p;
+            }
+            parameters->end=parameters->start+iteration_end-1;
+        }
 
      /**
         * @brief fill vector with double 1.0
@@ -54,8 +76,8 @@
         * @param parameters struct that has been created
     */
     void testTaskParamMemory(double *A, double *B, double *C, struct Parameters* parameters){
-        if( A == NULL || B == NULL || C == NULL || parameters) {
-            printf("malloc failed - Not enough memory");
+        if( A == NULL || B == NULL || C == NULL || parameters == NULL) {
+            printf("malloc failed - Not enough memory for tasks");
             exit(EXIT_FAILURE);
         }
     }
@@ -69,6 +91,8 @@
         * @param parameters struct with all details needed for execution of the task
      */
     void vectorVectorSum (int n, struct Parameters* parameters){
+        #pragma omp atomic update
+            test_tasks++;
         for (int i = 0; i < n; ++i){
             parameters->C[i] = parameters->A[i] + parameters->B[i];
         }
@@ -81,6 +105,8 @@
         * @param parameters struct with all details needed for execution of the task
     */
     void matrixVectorProduct (int n, struct Parameters* parameters){
+        #pragma omp atomic update
+            test_tasks++;
         for(int i=0;i<n;i++) {
           parameters->C[i]=0;
           for(int j=0;j<n;j++) {
@@ -96,6 +122,8 @@
         * @param parameters struct with all details needed for execution of the task
     */
     void matrixMatrixProduct(int n, struct Parameters* parameters){
+        #pragma omp atomic update
+            test_tasks++;
         for (int i=0; i<n; i=i+1){
             for (int j=0; j<n; j=j+1){
                  parameters->C[i*n+j]=0.;
@@ -138,6 +166,9 @@
                     exit(EXIT_FAILURE);
                 }
             }
+            int rank = omp_get_thread_num();
+            int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
+            calculateStartAndEndForParams(parameters, iteration_end, rank, tasks, p, input_size);
             #pragma omp for
             for (int i=0;i<tasks;i++){
                 struct Node* currentNode;
@@ -218,6 +249,7 @@
                 exit(EXIT_FAILURE);
             }
             int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
+            calculateStartAndEndForParams(parameters, iteration_end, rank, tasks, p, input_size);
             for(int i=0; i<iteration_end; i++){ // add tasks into local queues
                 push(local_queue, task_func_ptr);
             }
@@ -251,6 +283,7 @@
                exit(EXIT_FAILURE);
            }
            int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
+           calculateStartAndEndForParams(parameters, iteration_end, rank, tasks, p, input_size);
            for(int i=0; i<iteration_end; i++){ // add tasks into local queues
                pushWithLock(local_queue, task_func_ptr);
            }
@@ -363,6 +396,7 @@
     void executeProgram(void (*task_func_ptr)(int, Parameters*), int create, int m, int n, int execute, int p, int rep, struct Parameters* parameters){
         double mean=0;
         for(int i=0; i<rep; i++){
+            test_tasks=0;
             double start_time = omp_get_wtime();
             if(create==1){
                 struct Queue* queue = (struct Queue*)malloc(sizeof(struct Queue));
@@ -386,6 +420,10 @@
             }
             double time = omp_get_wtime() - start_time;
             mean+=time;
+            if(test_tasks!=m){
+                printf("The number of executed tasks (%d) does not match the required number (%d)\n", test_tasks, m);
+                exit(EXIT_FAILURE);
+            }
         }
         printf("Done in an average time of: %f\n", (mean/rep));
     }
