@@ -34,17 +34,18 @@
         * @param p number of threads
         * @param n input size for the tasks
     */
-    void calculateStartAndEndForParams(struct Parameters* parameters, int iteration_end, int rank, int tasks, int p, int n){
-            if((tasks%p)>rank){
-                parameters->start=rank*n/p+rank;
-            }
-            else{
-                parameters->start=rank*n/p+tasks%p;
-            }
-            parameters->end=parameters->start+iteration_end-1;
+    void calculateStartAndEndForParams(struct Parameters* parameters, int rank, int tasks, int p, int n){
+        if((tasks%p)>rank){
+            parameters->start=rank*n+rank*tasks*n/p;
+            parameters->end=parameters->start+tasks*n/p;
         }
+        else{
+            parameters->start=rank*tasks*n/p+n%p;
+            parameters->end=parameters->start+tasks*n/p-1;
+        }
+    }
 
-     /**
+    /**
         * @brief fill vector with double 1.0
         * @source original structure taken from Parallel Computing (184.710)
         * @param m vector to fill
@@ -66,6 +67,15 @@
           free(m);
         }
         return 0;
+    }
+
+    //Original function is taken from Parallel Computing (184.710)
+    void print_vector(double* m, int n) {
+        for(int i=0; i<n; i++) {
+          printf("%8.4f ", m[i]);
+        }
+        printf("%d \n", omp_get_thread_num());
+        printf("\n");
     }
 
      /**
@@ -90,10 +100,10 @@
         * @param n size of the vectors
         * @param parameters struct with all details needed for execution of the task
      */
-    void vectorVectorSum (int n, struct Parameters* parameters){
+    void vectorVectorSum (int n, struct Parameters* parameters, int start){
         #pragma omp atomic update
             test_tasks++;
-        for (int i = 0; i < n; ++i){
+        for (int i = start; i < start+n; ++i){
             parameters->C[i] = parameters->A[i] + parameters->B[i];
         }
     }
@@ -104,13 +114,13 @@
         * @param n size of the vector and the square matrix
         * @param parameters struct with all details needed for execution of the task
     */
-    void matrixVectorProduct (int n, struct Parameters* parameters){
+    void matrixVectorProduct (int n, struct Parameters* parameters,  int start){
         #pragma omp atomic update
             test_tasks++;
         for(int i=0;i<n;i++) {
-          parameters->C[i]=0;
+          parameters->C[start+i]=0;
           for(int j=0;j<n;j++) {
-              parameters->C[i] += parameters->B[i*n+j]*parameters->A[j];
+              parameters->C[start+i] += parameters->B[start+i*n+j]*parameters->A[start+j];
           }
         }
     }
@@ -121,14 +131,14 @@
         * @param n size of the square matrices
         * @param parameters struct with all details needed for execution of the task
     */
-    void matrixMatrixProduct(int n, struct Parameters* parameters){
+    void matrixMatrixProduct(int n, struct Parameters* parameters,  int start){
         #pragma omp atomic update
             test_tasks++;
         for (int i=0; i<n; i=i+1){
             for (int j=0; j<n; j=j+1){
-                 parameters->C[i*n+j]=0.;
+                    parameters->C[start+i*n+j]=0.0;
                  for (int k=0; k<n; k=k+1){
-                    parameters->C[i*n+j]+=(parameters->A[i*n+k])*(parameters->B[k*n+j]);
+                    parameters->C[start+i*n+j]+=(parameters->A[start+i*n+k])*(parameters->B[start+k*n+j]);
                  }
             }
         }
@@ -146,7 +156,7 @@
     }
 
     //TODO: Doc
-    void pattern1WithoutWorkStealing(struct Queue* queue, void (*task_func_ptr)(int, Parameters*), int tasks,
+    void pattern1WithoutWorkStealing(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks,
                                      int input_size, int p, int e, struct Parameters* parameters){
         struct Node* head_next;
         #pragma omp parallel num_threads(p)
@@ -154,7 +164,11 @@
              #pragma omp master //first add tasks into (global) queue
             {
                 for(int i=0; i<tasks; i++){
-                    push(queue, task_func_ptr);
+                    if(task_func_ptr==&matrixMatrixProduct){
+                        push(queue, task_func_ptr, parameters->start+i*input_size*input_size);
+                    }else{
+                        push(queue, task_func_ptr, parameters->start+i*input_size);
+                    }
                 }
                 head_next = queue->head;
             }
@@ -166,9 +180,6 @@
                     exit(EXIT_FAILURE);
                 }
             }
-            int rank = omp_get_thread_num();
-            int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-            calculateStartAndEndForParams(parameters, iteration_end, rank, tasks, p, input_size);
             #pragma omp for
             for (int i=0;i<tasks;i++){
                 struct Node* currentNode;
@@ -179,7 +190,7 @@
                 }
                 #pragma omp atomic
                     queue->list_size=queue->list_size-1;
-                (* currentNode->task)(input_size, parameters); //execute task
+                (* currentNode->task)(input_size, parameters, currentNode->start); //execute task
                 free(currentNode);
             }
         }
@@ -196,7 +207,7 @@
         * @param e specify whether work stealing is used
         * @param parameters input for the tasks
     */
-    void pattern1(struct Queue* queue, void (*task_func_ptr)(int, Parameters*), int tasks, int input_size, int p, int e, struct Parameters* parameters){
+    void pattern1(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks, int input_size, int p, int e, struct Parameters* parameters){
         if(e==1){ //No work stealing
             pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e, parameters);
         }else if (e==2){
@@ -222,14 +233,14 @@
             struct Node* currentNode;
             currentNode = head_next;
             head_next = head_next->next;
-            (* currentNode->task)(input_size, parameters); //execute task
+            (* currentNode->task)(input_size, parameters, currentNode->start); //execute task
             queue->list_size=queue->list_size-1;
             free(currentNode);
         }
     }
 
     //TODO: Doc
-    void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*),
+    void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
                                     int tasks, int input_size, int p, int e, struct Parameters* parameters){
         #pragma omp parallel num_threads(p)
         {
@@ -249,9 +260,9 @@
                 exit(EXIT_FAILURE);
             }
             int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-            calculateStartAndEndForParams(parameters, iteration_end, rank, tasks, p, input_size);
+            calculateStartAndEndForParams(parameters, rank, tasks, p, input_size);
             for(int i=0; i<iteration_end; i++){ // add tasks into local queues
-                push(local_queue, task_func_ptr);
+                push(local_queue, task_func_ptr, parameters->start+i*input_size);
             }
             if(local_queue->list_size!=iteration_end){
                 printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n", local_queue->list_size, iteration_end);
@@ -263,7 +274,7 @@
     }
 
     //TODO: Doc, teilen und übersichtlicher machen + ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
-    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*),
+    void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
                                     int tasks, int input_size, int p, int e, struct Parameters* parameters){
        #pragma omp parallel num_threads(p)
        {
@@ -283,9 +294,9 @@
                exit(EXIT_FAILURE);
            }
            int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-           calculateStartAndEndForParams(parameters, iteration_end, rank, tasks, p, input_size);
+           calculateStartAndEndForParams(parameters, rank, tasks, p, input_size);
            for(int i=0; i<iteration_end; i++){ // add tasks into local queues
-               pushWithLock(local_queue, task_func_ptr);
+               pushWithLock(local_queue, task_func_ptr, parameters->start+i*input_size);
            }
            if(iteration_end!=0){
                #pragma omp atomic write
@@ -337,7 +348,7 @@
         * @param e specify whether work stealing is used
         * @param parameters input for the tasks
     */
-    void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*), int tasks, int input_size, int p, int e, struct Parameters* parameters){
+    void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int), int tasks, int input_size, int p, int e, struct Parameters* parameters){
             if(e==1){ //No work stealing
                 pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e, parameters);
             }else if (e==2){ //Random selection - select one - threashhold...
@@ -348,8 +359,8 @@
     }
 
     //TODO: Doc + implement dynamic creation of tasks as discussed in last meeting
-    void pattern3(struct Queue* queue, void (*task_func_ptr)(int, Parameters*), int tasks, int input_size, int p, int e, struct Parameters* parameters){
-        if (tasks < 1){
+    void pattern3(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks, int input_size, int p, int e, struct Parameters* parameters){
+        /*if (tasks < 1){
             struct Node* head_next= queue->head;
             #pragma omp for
             for (int i=0;i<queue->list_size;i++){
@@ -372,13 +383,13 @@
                     {
                         if(tasks>0){
                             tasks--;
-                            push(queue, task_func_ptr);
+                            push(queue, task_func_ptr, i*input_size);
                             pattern3(queue, task_func_ptr, tasks, input_size, p, e, parameters);
                         }
                     }
                 }
             }
-        }
+        }*/
     }
 
      /**
@@ -393,7 +404,7 @@
         * @param rep how often the program is executed
         * @param parameters input for the tasks
     */
-    void executeProgram(void (*task_func_ptr)(int, Parameters*), int create, int m, int n, int execute, int p, int rep, struct Parameters* parameters){
+    void executeProgram(void (*task_func_ptr)(int, Parameters*, int), int create, int m, int n, int execute, int p, int rep, struct Parameters* parameters){
         double mean=0;
         for(int i=0; i<rep; i++){
             test_tasks=0;
@@ -430,7 +441,6 @@
 
      /**
         * @brief create parameters for the program and execute it
-        * @param task_func_ptr pointer to the task that will be stored in the nodes
         * @param create specify which pattern will be used
         * @param m amount of tasks that have to be executed
         * @param n input for each task
@@ -441,25 +451,25 @@
     */
     void createParametersForProgramAndExecute(int create, int m, int n, int execute, int p, int rep, int type) {
         //Create task pointer here and input Params
-        void (*task_func_ptr)(int, Parameters*);
+        void (*task_func_ptr)(int, Parameters*,  int);
         int A_size=0;
         int B_size=0;
         int C_size=0;
         if(type==1){
             task_func_ptr =  &vectorVectorSum;
-            A_size=n*p;
-            B_size=n*p;
-            C_size=n*p;
+            A_size=n*m;
+            B_size=n*m;
+            C_size=n*m;
         }else if(type==2){
             task_func_ptr = &matrixVectorProduct;
-            A_size=n*p;
-            B_size=n*n*p*p;
-            C_size=n*p;
+            A_size=n*m;
+            B_size=n*n*m;
+            C_size=n*m;
         }else if(type==3){
             task_func_ptr = &matrixMatrixProduct;
-            A_size=n*n*p*p;
-            B_size=n*n*p*p;
-            C_size=n*n*p*p;
+            A_size=n*n*m;
+            B_size=n*n*m;
+            C_size=n*n*m;
         }else{
             exit(EXIT_FAILURE);
         }
@@ -471,6 +481,7 @@
         init_parameters(parameters);
         fill_vector(A, A_size);
         fill_vector(B, B_size);
+        fill_vector(C, C_size);
         parameters->A=A;
         parameters->B=B;
         parameters->C=C;

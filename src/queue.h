@@ -27,10 +27,11 @@
         * @element task points the task with has to executed by one thread
     */
     struct Node {
+        int start;
         int lock;
         struct Node* next;
         struct Node* prev;
-        void (*task)(int, Parameters*);
+        void (*task)(int, Parameters*, int);
     };
 
      /**
@@ -82,8 +83,8 @@
     };
 
     //Description can be found in queue.c
-    void push(struct Queue* queue, void (*task)(int, Parameters*));
-    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*));
+    void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start);
+    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start);
     void removeTailWithLock(struct Queue* queue, int input_size, struct Parameters* parameters);
     void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue);
     void init_queue(struct Queue* queue);

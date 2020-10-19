@@ -15,13 +15,15 @@
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
+        * @param start points to the start address of the task
     */
-    void push(struct Queue* queue, void (*task)(int, Parameters*)){
+    void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start){
         struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
         if( new_node == NULL ) {
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
         }
+        new_node->start=start;
         new_node->task=task;
         new_node->prev = NULL;
         if(queue->head==NULL){
@@ -41,13 +43,15 @@
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
+        * @param start points to the start address of the task
     */
-    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*)){
+    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start){
         struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
         if( new_node == NULL ) {
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
         }
+        new_node->start=start;
         new_node->task=task;
         new_node->lock=1;
         new_node->prev = NULL;
@@ -114,7 +118,7 @@
                 #pragma omp atomic write
                     queue->tail->lock=0;
                 while(old_tail!=NULL){
-                    (* old_tail->task)(input_size, parameters); //execute task
+                    (* old_tail->task)(input_size, parameters, old_tail->start); //execute task
                     old_tail=old_tail->prev;
                 }
             }
