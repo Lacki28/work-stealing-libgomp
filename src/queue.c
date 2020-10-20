@@ -15,6 +15,7 @@
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
+        * @param parameters parameter for executing tasks
         * @param start points to the start address of the task
     */
     void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start){
@@ -43,6 +44,7 @@
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
+        * @param parameters parameter for executing tasks
         * @param start points to the start address of the task
     */
     void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start){
@@ -76,6 +78,7 @@
         * @details remove nodes at the end of the list, lock tail, so that no other thread can access it while removing tasks
         * @param queue queue from which the nodes are taken
         * @param input_size parameter for executing tasks
+        * @param parameters parameter for executing tasks
     */
     void removeTailWithLock(struct Queue* queue, int input_size, struct Parameters* parameters){
         #pragma omp critical//Only one task can steal from this queue

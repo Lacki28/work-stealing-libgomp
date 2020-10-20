@@ -20,6 +20,7 @@
         * @brief elements of the queue
         * @details double linked list, queue points to head and tail
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
+        * @element start points to the starting address for executing tasks
         * @element lock, lock head when adding tasks and tail when stealing
                          - 0=unlocked, 1=head, lock>1=rank of thread with id lock-2 currently owns the lock
         * @element next points to next node in DLL

@@ -36,12 +36,20 @@
     */
     void calculateStartAndEndForParams(struct Parameters* parameters, int rank, int tasks, int p, int n){
         if((tasks%p)>rank){
-            parameters->start=rank*n+rank*tasks*n/p;
-            parameters->end=parameters->start+tasks*n/p;
+            parameters->start=rank*n+rank*n*tasks/p;
+            parameters->end=parameters->start+n*tasks/p;
+            #pragma omp critical
+            {
+                printf("H: %d: %d - %d\n", omp_get_thread_num(), parameters->start, parameters->end);
+            }
         }
         else{
-            parameters->start=rank*tasks*n/p+n%p;
-            parameters->end=parameters->start+tasks*n/p-1;
+            parameters->start=rank*n*tasks/p+tasks%p;
+            parameters->end=parameters->start+n*tasks/p-1;
+            #pragma omp critical
+                {
+                    printf("%d: %d - %d\n", omp_get_thread_num(), parameters->start, parameters->end);
+                }
         }
     }
 
@@ -67,15 +75,6 @@
           free(m);
         }
         return 0;
-    }
-
-    //Original function is taken from Parallel Computing (184.710)
-    void print_vector(double* m, int n) {
-        for(int i=0; i<n; i++) {
-          printf("%8.4f ", m[i]);
-        }
-        printf("%d \n", omp_get_thread_num());
-        printf("\n");
     }
 
      /**
@@ -155,9 +154,18 @@
         }
     }
 
-    //TODO: Doc
+    /**
+        * @brief execute tasks that are stored in global queue
+        * @details parallel execution of tasks stored in a global queue, without work stealing
+        * @param queue global queue used by all threads
+        * @param task_func_ptr pointer to the task that will be stored in the nodes
+        * @param tasks amount of tasks that have to be executed
+        * @param input_size input for each task
+        * @param p amount of threads that execute the program
+        * @param parameters input for the tasks
+    */
     void pattern1WithoutWorkStealing(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks,
-                                     int input_size, int p, int e, struct Parameters* parameters){
+                                     int input_size, int p, struct Parameters* parameters){
         struct Node* head_next;
         #pragma omp parallel num_threads(p)
         {
@@ -209,10 +217,10 @@
     */
     void pattern1(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks, int input_size, int p, int e, struct Parameters* parameters){
         if(e==1){ //No work stealing
-            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e, parameters);
+            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, parameters);
         }else if (e==2){
             //work stealing
-            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, e, parameters);
+            pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, parameters);
         }else{
             exit(EXIT_FAILURE);
         }
@@ -239,10 +247,20 @@
         }
     }
 
-    //TODO: Doc
+     /**
+        * @brief execute tasks that are stored in local queues
+        * @details Each thread creates its own queue in which the tasks are stored for later execution.
+        * Without the need for synchronization, the threads then perform the tasks of their own queues.
+        * @param queue global queue used by all threads
+        * @param task_func_ptr pointer to the task that will be stored in the nodes
+        * @param tasks amount of tasks that have to be executed
+        * @param input_size input for each task
+        * @param p amount of threads that execute the program
+        * @param parameters input for the tasks
+    */
     void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
-                                    int tasks, int input_size, int p, int e, struct Parameters* parameters){
-        #pragma omp parallel num_threads(p)
+                                    int tasks, int input_size, int p, struct Parameters* parameters){
+        #pragma omp parallel firstprivate (parameters) num_threads(p)
         {
             int rank = omp_get_thread_num();
             struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
@@ -260,9 +278,29 @@
                 exit(EXIT_FAILURE);
             }
             int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-            calculateStartAndEndForParams(parameters, rank, tasks, p, input_size);
+            //calculateStartAndEndForParams(parameters, rank, tasks, p, input_size);
+            #pragma omp barrier
+            //TODO solve this race condition
+            if((tasks%p)>rank){
+                parameters->start=rank*input_size+rank*input_size*tasks/p;
+                parameters->end=parameters->start+input_size*tasks/p;
+
+                    printf("H: %d: %d - %d\n", omp_get_thread_num(), parameters->start, parameters->end);
+
+            }
+            else{
+                parameters->start=rank*input_size*tasks/p+tasks%p;
+                parameters->end=parameters->start+input_size*tasks/p-1;
+
+                        printf("%d: %d - %d\n", omp_get_thread_num(), parameters->start, parameters->end);
+
+            }
             for(int i=0; i<iteration_end; i++){ // add tasks into local queues
-                push(local_queue, task_func_ptr, parameters->start+i*input_size);
+                if(task_func_ptr==&matrixMatrixProduct){
+                     push(local_queue, task_func_ptr, parameters->start+i*input_size*input_size);
+                }else{
+                     push(local_queue, task_func_ptr, parameters->start+i*input_size);
+                }
             }
             if(local_queue->list_size!=iteration_end){
                 printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n", local_queue->list_size, iteration_end);
@@ -273,10 +311,23 @@
         }
     }
 
-    //TODO: Doc, teilen und übersichtlicher machen + ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
+    //TODO: ansatz 2 queues eine von der ich stehlen kann und eine normale? - Ende speichern, dass in die globale Queue - critical
+     /**
+        * @brief execute tasks stored in local queues and steal tasks from neighboring threads if possible
+        * @details Each thread creates its own queue in which the tasks are stored for later execution.
+        * The queues of all threads are stored in a global queue that each thread can access.
+        * After one thread has completed its own tasks it then tries to steal tasks from neighboring threads if possible
+        * and executes the stoles tasks.
+        * @param queue global queue used by all threads
+        * @param task_func_ptr pointer to the task that will be stored in the nodes
+        * @param tasks amount of tasks that have to be executed
+        * @param input_size input for each task
+        * @param p amount of threads that execute the program
+        * @param parameters input for the tasks
+    */
     void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
-                                    int tasks, int input_size, int p, int e, struct Parameters* parameters){
-       #pragma omp parallel num_threads(p)
+                                    int tasks, int input_size, int p, struct Parameters* parameters){
+       #pragma omp parallel firstprivate (parameters) num_threads(p)
        {
            int rank=omp_get_thread_num();
            struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
@@ -296,7 +347,11 @@
            int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
            calculateStartAndEndForParams(parameters, rank, tasks, p, input_size);
            for(int i=0; i<iteration_end; i++){ // add tasks into local queues
-               pushWithLock(local_queue, task_func_ptr, parameters->start+i*input_size);
+                if(task_func_ptr==&matrixMatrixProduct){
+                    pushWithLock(local_queue, task_func_ptr, parameters->start+i*input_size*input_size);
+                }else{
+                    pushWithLock(local_queue, task_func_ptr, parameters->start+i*input_size);
+                }
            }
            if(iteration_end!=0){
                #pragma omp atomic write
@@ -350,9 +405,9 @@
     */
     void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int), int tasks, int input_size, int p, int e, struct Parameters* parameters){
             if(e==1){ //No work stealing
-                pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e, parameters);
+                pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
             }else if (e==2){ //Random selection - select one - threashhold...
-                pattern2WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, e, parameters);
+                pattern2WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
             }else{
                 exit(EXIT_FAILURE);
             }
@@ -439,6 +494,14 @@
         printf("Done in an average time of: %f\n", (mean/rep));
     }
 
+//Original function is taken from Parallel Computing (184.710)
+        void print_vector(double* m, int n, FILE *out) {
+          for(int i=0; i<n; i++) {
+              fprintf(out, "%8.4f ", m[i]);
+          }
+          printf("%d", omp_get_thread_num());
+          fprintf(out, "\n");
+        }
      /**
         * @brief create parameters for the program and execute it
         * @param create specify which pattern will be used
@@ -486,6 +549,7 @@
         parameters->B=B;
         parameters->C=C;
         executeProgram(task_func_ptr, create, m, n, execute, p, rep, parameters);
+        print_vector(C, C_size, stdout);
         free_vector(A);
         free_vector(B);
         free_vector(C);
