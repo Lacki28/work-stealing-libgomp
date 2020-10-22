@@ -21,6 +21,7 @@
         * @details double linked list, queue points to head and tail
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @element start points to the starting address for executing tasks
+        * @element input_size inputparameter for task
         * @element lock, lock head when adding tasks and tail when stealing
                          - 0=unlocked, 1=head, lock>1=rank of thread with id lock-2 currently owns the lock
         * @element next points to next node in DLL
@@ -29,6 +30,7 @@
     */
     struct Node {
         int start;
+        int input_size;
         int lock;
         struct Node* next;
         struct Node* prev;
@@ -84,9 +86,10 @@
     };
 
     //Description can be found in queue.c
-    void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start);
-    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start);
-    void removeTailWithLock(struct Queue* queue, int input_size, struct Parameters* parameters);
+    void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
+    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
+    void pushBeforeNode(struct Queue* queue, struct Node* node, void (*task)(int, Parameters*, int), int start, int input_size);
+    void removeTailWithLock(struct Queue* queue, struct Parameters* parameters);
     void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue);
     void init_queue(struct Queue* queue);
     void init_global_queue(struct Global_Queue* queue);

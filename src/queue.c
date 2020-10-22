@@ -15,15 +15,16 @@
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
-        * @param parameters parameter for executing tasks
         * @param start points to the start address of the task
+        * @param input_size parameter for executing tasks
     */
-    void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start){
+    void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size){
         struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
         if( new_node == NULL ) {
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
         }
+        new_node->input_size=input_size;
         new_node->start=start;
         new_node->task=task;
         new_node->prev = NULL;
@@ -44,15 +45,16 @@
         * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
         * @param queue queue to which the new node is added
         * @param task points to a task stored in the node
-        * @param parameters parameter for executing tasks
         * @param start points to the start address of the task
+        * @param input_size parameter for executing tasks
     */
-    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start){
+    void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size){
         struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
         if( new_node == NULL ) {
             printf("malloc failed - Not enough memory");
             exit(EXIT_FAILURE);
         }
+        new_node->input_size=input_size;
         new_node->start=start;
         new_node->task=task;
         new_node->lock=1;
@@ -73,14 +75,48 @@
         queue->list_size = queue->list_size+1;
     }
 
+
+    /**
+            * @brief add new node in critical section
+            * @details insert a new node on the front of the list, lock head, so that no other thread can access it while inserting new tasks
+            * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
+            * @param node node before which the new one is inserted
+            * @param task points to a task stored in the node
+            * @param start points to the start address of the task
+            * @param input_size parameter for executing tasks
+    */
+        void pushBeforeNode(struct Queue* queue, struct Node* node, void (*task)(int, Parameters*, int), int start, int input_size){
+            struct Node* new_node = (struct Node*)malloc(sizeof(struct Node));
+            if( new_node == NULL ) {
+                printf("malloc failed - Not enough memory");
+                exit(EXIT_FAILURE);
+            }
+            if(node->input_size%2==0){
+                new_node->input_size=input_size/2;
+            }else{
+                new_node->input_size=input_size/2+1;
+            }
+            node->input_size=input_size/2;
+            new_node->start=start+input_size/2-1;
+            new_node->task=task;
+            new_node->lock=0;
+            new_node->prev = node->prev;
+            new_node->next=node;
+            if(node->prev!=NULL){
+                node->prev->next=new_node;
+            }
+            node->prev=new_node;
+            #pragma omp atomic update
+                queue->list_size = queue->list_size+1;
+        }
+
     /**
         * @brief remove nodes in critical section
         * @details remove nodes at the end of the list, lock tail, so that no other thread can access it while removing tasks
         * @param queue queue from which the nodes are taken
-        * @param input_size parameter for executing tasks
         * @param parameters parameter for executing tasks
     */
-    void removeTailWithLock(struct Queue* queue, int input_size, struct Parameters* parameters){
+    void removeTailWithLock(struct Queue* queue, struct Parameters* parameters){
         #pragma omp critical//Only one task can steal from this queue
         {
             if(queue->tail->lock==0){
@@ -121,7 +157,7 @@
                 #pragma omp atomic write
                     queue->tail->lock=0;
                 while(old_tail!=NULL){
-                    (* old_tail->task)(input_size, parameters, old_tail->start); //execute task
+                    (* old_tail->task)(old_tail->input_size, parameters, old_tail->start); //execute task
                     old_tail=old_tail->prev;
                 }
             }
