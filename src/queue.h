@@ -88,7 +88,7 @@
     //Description can be found in queue.c
     void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
     void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
-    void pushBeforeNode(struct Queue* queue, struct Node* node, void (*task)(int, Parameters*, int), int start, int input_size);
+    void pushBeforeNode(struct Queue* queue, struct Node* node, int start, int task_complexity);
     void removeTailWithLock(struct Queue* queue, struct Parameters* parameters);
     void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue);
     void init_queue(struct Queue* queue);
