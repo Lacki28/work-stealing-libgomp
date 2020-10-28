@@ -5,8 +5,9 @@
         * @file libgomp-test.c
         * @author Anna Lackinger 11776842
         * @date 14.10.2020
-        * @brief  multiplies two hexadecimal numbers
-        * @details the program creates four child processes, which then recursively do the calculation of the two numbers.
+        * @brief the program creates and executes tasks in parallel
+        * @details the program creates and executes tasks in parallel using
+        * different creation patterns and stealing methods
         */
 
         /**
@@ -263,7 +264,7 @@
                 struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                 testQueueMemory(local_queue);
                 init_queue(local_queue);
-                #pragma omp for ordered  //add local queues into global one
+                #pragma omp for ordered  //add local queues to global one
                     for (int i=0; i<p; i++) {
                         #pragma omp ordered
                         {  //printf("Rank: %d\n", rank);
@@ -283,7 +284,7 @@
                     }else{
                         start= calculateStart(rank, tasks, p, input_size);
                     }
-                    for(int i=0; i<iteration_end; i++){ // add tasks into local queues
+                    for(int i=0; i<iteration_end; i++){ // add tasks to local queues
                         if(task_func_ptr==&matrixMatrixProduct){
                              push(local_queue, task_func_ptr, start+i*input_size*input_size, input_size);
                         }else{
@@ -411,7 +412,7 @@
         int input_size, int p, int e, struct Parameters* parameters){
                 if(e==1){ //No work stealing
                     pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
-                }else if (e==2){ //Random selection - select one - threashhold...
+                }else if (e==2){
                     pattern2WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
                 }else{
                     exit(EXIT_FAILURE);
@@ -667,7 +668,7 @@
                     exit(EXIT_FAILURE);
                 }
                 double time = omp_get_wtime() - start_time;
-                mean+=time;
+                    mean+=time;
                 if(test_tasks!=m){
                     if (create!=3){
                         printf("The number of executed tasks (%d) does not match the required number (%d)\n", test_tasks, m);
