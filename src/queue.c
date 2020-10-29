@@ -152,7 +152,6 @@
                         #pragma omp atomic write
                             locked = helpNode->lock;
                         if(locked==1){
-                            helpNode=helpNode->next;
                             break;
                         }
                         helpNode=helpNode->prev;

@@ -303,7 +303,7 @@
         }
 
         void stealTasks(struct Queue* local_queue, struct Global_Queue* global_queue, struct Parameters* parameters){
-            //steal from next node
+            //steal from previous node
             if(local_queue==global_queue->head_queue){
                 while(global_queue->tail_queue->list_size>1){
                    printf("STEALING prev: %d\n", omp_get_thread_num());
@@ -315,7 +315,7 @@
                     removeTailWithLock(local_queue->prev_queue, parameters);
                 }
             }
-            //steal from previous node
+            //steal from next node
             if(local_queue==global_queue->tail_queue){
                 while(global_queue->head_queue->list_size>1){
                    printf("STEALING next: %d\n", omp_get_thread_num());
@@ -378,11 +378,6 @@
                             pushWithLock(local_queue, task_func_ptr, start+i*input_size, input_size);
                        }
                    }
-                   if(local_queue->list_size!=iteration_end){
-                       printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n",
-                       local_queue->list_size, iteration_end);
-                       exit(EXIT_FAILURE);
-                   }
                    if(iteration_end!=0){
                        #pragma omp atomic write
                            local_queue->head->lock=0;
@@ -393,7 +388,7 @@
                    }
                }
                stealTasks(local_queue, global_queue, parameters);
-               free(local_queue);
+               //free(local_queue);
             }
         }
 
@@ -526,7 +521,7 @@
                        removeTailWithLock(local_queue, parameters);
                    }
                }
-               free(local_queue);
+               //free(local_queue);
             }
         }
 
@@ -561,7 +556,7 @@
                        }
                    }
                if(global_queue->list_size!=p){
-                   printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
+                   printf("Not all tasks have been added correctly in global_queue pattern3: %d should be %d\n",
                    global_queue->list_size, p);
                    exit(EXIT_FAILURE);
                }
@@ -580,11 +575,6 @@
                        }else{
                             push(local_queue, task_func_ptr, start+i*input_size, input_size);
                        }
-                   }
-                   if(local_queue->list_size!=iteration_end){
-                       printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n",
-                       local_queue->list_size, iteration_end);
-                       exit(EXIT_FAILURE);
                    }
                    //start executing and stealing
                    doubleTasksRecursively(local_queue, input_size, parameters, start, task_func_ptr);
