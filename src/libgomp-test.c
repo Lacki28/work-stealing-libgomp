@@ -16,6 +16,20 @@
         int test_tasks;
 
         /**
+            * @brief parameters used in all patterns
+            * @element task_func_ptr pointer to the task that will be stored in the nodes
+            * @element tasks amount of tasks that have to be executed
+            * @element input_size input for each task
+            * @element p amount of threads that execute the program
+        */
+        struct Function_Parameters{
+            void (*task_func_ptr)(int, Parameters*, int);
+            int tasks;
+            int input_size;
+            int p;
+        };
+
+        /**
             * @brief initialize parameters
             * @param params parameters to initialize
         */
@@ -155,24 +169,20 @@
             * @brief execute tasks that are stored in global queue
             * @details parallel execution of tasks stored in a global queue, without work stealing
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        void pattern1WithoutWorkStealing(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks,
-                                         int input_size, int p, struct Parameters* parameters){
+        void pattern1WithoutWorkStealing(struct Queue* queue, struct Function_Parameters* fp, struct Parameters* parameters){
             struct Node* head_next;
-            #pragma omp parallel num_threads(p)
+            #pragma omp parallel num_threads(fp->p)
             {
                  #pragma omp master //first add tasks into (global) queue
                 {
-                    for(int i=0; i<tasks; i++){
-                        if(task_func_ptr==&matrixMatrixProduct){
-                            push(queue, task_func_ptr, parameters->start+i*input_size*input_size,input_size);
+                    for(int i=0; i<fp->tasks; i++){
+                        if(fp->task_func_ptr==&matrixMatrixProduct){
+                            push(queue, fp->task_func_ptr, parameters->start+i*fp->input_size*fp->input_size,fp->input_size);
                         }else{
-                            push(queue, task_func_ptr, parameters->start+i*input_size, input_size);
+                            push(queue, fp->task_func_ptr, parameters->start+i*fp->input_size, fp->input_size);
                         }
                     }
                     head_next = queue->head;
@@ -180,13 +190,13 @@
                 #pragma omp barrier //wait for master to finish before executing the tasks
                 #pragma omp single //Test if all tasks have been added to queue - implicit barrier, so no task can be executed before this test
                 {
-                    if(queue->list_size!=tasks){
-                        printf("Not all tasks have been added correctly in pattern1: %d should be %d", queue->list_size, tasks);
+                    if(queue->list_size!=fp->tasks){
+                        printf("Not all tasks have been added correctly in pattern1: %d should be %d", queue->list_size, fp->tasks);
                         exit(EXIT_FAILURE);
                     }
                 }
                 #pragma omp for
-                for (int i=0;i<tasks;i++){
+                for (int i=0;i<fp->tasks;i++){
                     struct Node* currentNode;
                     #pragma omp critical
                     {
@@ -205,20 +215,16 @@
             * @brief execute pattern1: global queue
             * @details execute pattern1 with or without work stealing
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param function_Parameters parameters all patterns use
             * @param e specify whether work stealing is used
             * @param parameters input for the tasks
         */
-        void pattern1(struct Queue* queue, void (*task_func_ptr)(int, Parameters*, int), int tasks, int input_size,
-        int p, int e, struct Parameters* parameters){
+        void pattern1(struct Queue* queue, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
             if(e==1){ //No work stealing
-                pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, parameters);
+                pattern1WithoutWorkStealing(queue, function_Parameters, parameters);
             }else if (e==2){
                 //work stealing
-                pattern1WithoutWorkStealing(queue, task_func_ptr, tasks, input_size, p, parameters);
+                pattern1WithoutWorkStealing(queue, function_Parameters, parameters);
             }else{
                 exit(EXIT_FAILURE);
             }
@@ -250,45 +256,41 @@
             * @details Each thread creates its own queue in which the tasks are stored for later execution.
             * Without the need for synchronization, the threads then perform the tasks of their own queues.
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
-                                        int tasks, int input_size, int p, struct Parameters* parameters){
-            #pragma omp parallel num_threads(p)
+        void pattern2WithoutWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+            #pragma omp parallel num_threads(fp->p)
             {
                 int rank = omp_get_thread_num();
                 struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                 testQueueMemory(local_queue);
                 init_queue(local_queue);
                 #pragma omp for ordered  //add local queues to global one
-                    for (int i=0; i<p; i++) {
+                    for (int i=0; i<fp->p; i++) {
                         #pragma omp ordered
                         {  //printf("Rank: %d\n", rank);
                            pushQueue(global_queue, local_queue);
                         }
                      }
-                if(global_queue->list_size!=p){
+                if(global_queue->list_size!=fp->p){
                     printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                    global_queue->list_size, p);
+                    global_queue->list_size, fp->p);
                     exit(EXIT_FAILURE);
                 }
-                int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-                if(rank<tasks){
+                int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
+                if(rank<fp->tasks){
                     int start;
-                    if(task_func_ptr==&matrixMatrixProduct){
-                        start= calculateStart(rank, tasks, p, input_size*input_size);
+                    if(fp->task_func_ptr==&matrixMatrixProduct){
+                        start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
                     }else{
-                        start= calculateStart(rank, tasks, p, input_size);
+                        start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
                     }
                     for(int i=0; i<iteration_end; i++){ // add tasks to local queues
-                        if(task_func_ptr==&matrixMatrixProduct){
-                             push(local_queue, task_func_ptr, start+i*input_size*input_size, input_size);
+                        if(fp->task_func_ptr==&matrixMatrixProduct){
+                             push(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size, fp->input_size);
                         }else{
-                             push(local_queue, task_func_ptr, start+i*input_size, input_size);
+                             push(local_queue, fp->task_func_ptr, start+i*fp->input_size, fp->input_size);
                         }
                     }
                     if(local_queue->list_size!=iteration_end){
@@ -337,45 +339,42 @@
             * After one thread has completed its own tasks it then tries to steal tasks from neighboring threads if possible
             * and executes the stoles tasks.
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        void pattern2WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
-                                        int tasks, int input_size, int p, struct Parameters* parameters){
-           #pragma omp parallel num_threads(p)
+        void pattern2WithWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+           #pragma omp parallel num_threads(fp->p)
            {
+
                int rank=omp_get_thread_num();
                struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                testQueueMemory(local_queue);
                init_queue(local_queue);
                #pragma omp for ordered  //add local queues into global one
-                   for (int i=0; i<p; i++) {
+                   for (int i=0; i<fp->p; i++) {
                        #pragma omp ordered
                        {
                           pushQueue(global_queue, local_queue);
                        }
                    }
-               if(global_queue->list_size!=p){
+               if(global_queue->list_size!=fp->p){
                    printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                   global_queue->list_size, p);
+                   global_queue->list_size, fp->p);
                    exit(EXIT_FAILURE);
                }
-               int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-               if(rank<tasks){
+               int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
+               if(rank<fp->tasks){
                    int start;
-                   if(task_func_ptr==&matrixMatrixProduct){
-                       start= calculateStart(rank, tasks, p, input_size*input_size);
+                   if(fp->task_func_ptr==&matrixMatrixProduct){
+                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
                    }else{
-                       start= calculateStart(rank, tasks, p, input_size);
+                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
                    }
                    for(int i=0; i<iteration_end; i++){ // add tasks into local queues
-                       if(task_func_ptr==&matrixMatrixProduct){
-                            pushWithLock(local_queue, task_func_ptr, start+i*input_size*input_size, input_size);
+                       if(fp->task_func_ptr==&matrixMatrixProduct){
+                            pushWithLock(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size, fp->input_size);
                        }else{
-                            pushWithLock(local_queue, task_func_ptr, start+i*input_size, input_size);
+                            pushWithLock(local_queue, fp->task_func_ptr, start+i*fp->input_size, fp->input_size);
                        }
                    }
                    if(iteration_end!=0){
@@ -396,19 +395,15 @@
             * @brief execute pattern2: local queues
             * @details execute pattern2 with or without work stealing
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param function_Parameters parameters all patterns use
             * @param e specify whether work stealing is used
             * @param parameters input for the tasks
         */
-        void pattern2(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int), int tasks,
-        int input_size, int p, int e, struct Parameters* parameters){
+        void pattern2(struct Global_Queue* global_queue, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
                 if(e==1){ //No work stealing
-                    pattern2WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
+                    pattern2WithoutWorkStealing(global_queue,function_Parameters, parameters);
                 }else if (e==2){
-                    pattern2WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
+                    pattern2WithWorkStealing(global_queue, function_Parameters, parameters);
                 }else{
                     exit(EXIT_FAILURE);
                 }
@@ -467,46 +462,42 @@
             * After one thread has completed building its queue with all nodes having an input size below a certain threshold it then executes
             * its own tasks.
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        void pattern3WithoutWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
-        int tasks, int input_size, int p, struct Parameters* parameters){
-             #pragma omp parallel num_threads(p)
+        void pattern3WithoutWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+             #pragma omp parallel num_threads(fp->p)
             {
                int rank=omp_get_thread_num();
                struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                testQueueMemory(local_queue);
                init_queue(local_queue);
                #pragma omp for ordered  //add local queues into global one
-                   for (int i=0; i<p; i++) {
+                   for (int i=0; i<fp->p; i++) {
                        #pragma omp ordered
                        {
                           pushQueue(global_queue, local_queue);
                        }
                    }
-               if(global_queue->list_size!=p){
+               if(global_queue->list_size!=fp->p){
                    printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                   global_queue->list_size, p);
+                   global_queue->list_size, fp->p);
                    exit(EXIT_FAILURE);
                }
-               int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-               if(rank<tasks){
+               int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
+               if(rank<fp->tasks){
                    int start;
-                   if(task_func_ptr==&matrixMatrixProduct){
-                       start= calculateStart(rank, tasks, p, input_size*input_size);
+                   if(fp->task_func_ptr==&matrixMatrixProduct){
+                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
                    }else{
-                       start= calculateStart(rank, tasks, p, input_size);
+                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
                    }
-                   pushWithLock(local_queue, task_func_ptr, start, input_size);//lock tail
+                   pushWithLock(local_queue, fp->task_func_ptr, start, fp->input_size);//lock tail
                    for(int i=1; i<iteration_end; i++){ // add tasks into local queues
-                       if(task_func_ptr==&matrixMatrixProduct){
-                            push(local_queue, task_func_ptr, start+i*input_size*input_size,input_size);
+                       if(fp->task_func_ptr==&matrixMatrixProduct){
+                            push(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size,fp->input_size);
                        }else{
-                            push(local_queue, task_func_ptr, start+i*input_size, input_size);
+                            push(local_queue, fp->task_func_ptr, start+i*fp->input_size, fp->input_size);
                        }
                    }
                    if(local_queue->list_size!=iteration_end){
@@ -514,7 +505,7 @@
                        local_queue->list_size, iteration_end);
                        exit(EXIT_FAILURE);
                    } //split tasks
-                   doubleTasksRecursively(local_queue, input_size, parameters, start, task_func_ptr);
+                   doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
                    #pragma omp atomic write //unlock tail to make queue ready for execution
                         local_queue->tail->lock=0;
                    while(local_queue->list_size>0){                   //start executing and stealing
@@ -534,50 +525,46 @@
             * its own tasks and afterwards tries to steal tasks from neighboring threads if possible
             * and executes the stoles tasks.
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        void pattern3WithWorkStealing(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int),
-        int tasks, int input_size, int p, struct Parameters* parameters){
-            #pragma omp parallel num_threads(p)
+        void pattern3WithWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+            #pragma omp parallel num_threads(fp->p)
             {
                int rank=omp_get_thread_num();
                struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                testQueueMemory(local_queue);
                init_queue(local_queue);
                #pragma omp for ordered  //add local queues into global one
-                   for (int i=0; i<p; i++) {
+                   for (int i=0; i<fp->p; i++) {
                        #pragma omp ordered
                        {
                           pushQueue(global_queue, local_queue);
                        }
                    }
-               if(global_queue->list_size!=p){
+               if(global_queue->list_size!=fp->p){
                    printf("Not all tasks have been added correctly in global_queue pattern3: %d should be %d\n",
-                   global_queue->list_size, p);
+                   global_queue->list_size, fp->p);
                    exit(EXIT_FAILURE);
                }
-               int iteration_end = (tasks%p)>rank ? (tasks/p)+1 : tasks/p;
-               if(rank<tasks){
+               int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
+               if(rank<fp->tasks){
                    int start;
-                   if(task_func_ptr==&matrixMatrixProduct){
-                       start= calculateStart(rank, tasks, p, input_size*input_size);
+                   if(fp->task_func_ptr==&matrixMatrixProduct){
+                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
                    }else{
-                       start= calculateStart(rank, tasks, p, input_size);
+                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
                    }
-                   pushWithLock(local_queue, task_func_ptr, start, input_size);//lock tail
+                   pushWithLock(local_queue, fp->task_func_ptr, start, fp->input_size);//lock tail
                    for(int i=1; i<iteration_end; i++){ // add tasks into local queues
-                       if(task_func_ptr==&matrixMatrixProduct){
-                            push(local_queue, task_func_ptr, start+i*input_size*input_size,input_size);
+                       if(fp->task_func_ptr==&matrixMatrixProduct){
+                            push(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size,fp->input_size);
                        }else{
-                            push(local_queue, task_func_ptr, start+i*input_size, input_size);
+                            push(local_queue, fp->task_func_ptr, start+i*fp->input_size, fp->input_size);
                        }
                    }
                    //start executing and stealing
-                   doubleTasksRecursively(local_queue, input_size, parameters, start, task_func_ptr);
+                   doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
                    #pragma omp atomic write //unlock tail to make queue ready for execution
                         local_queue->tail->lock=0;
                    while(local_queue->list_size>0){
@@ -594,19 +581,16 @@
             * @brief execute pattern3: local queues
             * @details execute pattern3 with or without work stealing, create tasks recursively
             * @param queue global queue used by all threads
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
-            * @param tasks amount of tasks that have to be executed
-            * @param input_size input for each task
-            * @param p amount of threads that execute the program
+            * @param function_Parameters parameters all patterns use
             * @param e specify whether work stealing is used
             * @param parameters input for the tasks
         */
-        void pattern3(struct Global_Queue* global_queue, void (*task_func_ptr)(int, Parameters*, int), int tasks,
-        int input_size, int p, int e, struct Parameters* parameters){
+        void pattern3(struct Global_Queue* global_queue, struct Function_Parameters* function_Parameters,
+         int e, struct Parameters* parameters){
                 if(e==1){ //No work stealing //TODO CHANGE
-                    pattern3WithoutWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
+                    pattern3WithoutWorkStealing(global_queue, function_Parameters, parameters);
                 }else if (e==2){ //Random selection - select one - threshold...
-                    pattern3WithWorkStealing(global_queue, task_func_ptr, tasks, input_size, p, parameters);
+                    pattern3WithWorkStealing(global_queue, function_Parameters, parameters);
                 }else{
                     exit(EXIT_FAILURE);
                 }
@@ -615,17 +599,15 @@
          /**
             * @brief execute the main program
             * @details execute the main program as often as rep specifies and calculate average the execution time
-            * @param task_func_ptr pointer to the task that will be stored in the nodes
             * @param create specify which pattern will be used
-            * @param m amount of tasks that have to be executed
-            * @param n input for each task
+            * @param function_Parameters parameters all patterns use
             * @param execute specify whether work stealing is used
-            * @param p amount of threads that execute the program
             * @param rep how often the program is executed
             * @param parameters input for the tasks
         */
-        void executeProgram(void (*task_func_ptr)(int, Parameters*, int), int create, int m, int n, int execute,
-        int p, int rep, struct Parameters* parameters){
+
+        void executeProgram(int create, struct Function_Parameters* function_Parameters, int execute,
+        int rep, struct Parameters* parameters){
             double mean=0;
             for(int i=0; i<rep; i++){
                 test_tasks=0;
@@ -634,7 +616,7 @@
                     struct Queue* queue = (struct Queue*)malloc(sizeof(struct Queue));
                     testQueueMemory(queue);
                     init_queue(queue);
-                    pattern1 (queue, task_func_ptr, m, n, p, execute, parameters);
+                    pattern1 (queue, function_Parameters, execute, parameters);
                     free(queue);
                 }else if(create==2){ //TODO: threshold
                     struct Global_Queue* queue = (struct Global_Queue*)malloc(sizeof(struct Global_Queue));
@@ -643,7 +625,7 @@
                         exit(EXIT_FAILURE);
                     }
                     init_global_queue(queue);
-                    pattern2 (queue, task_func_ptr, m, n, p, execute, parameters);
+                    pattern2 (queue, function_Parameters, execute, parameters);
                     free(queue);
                 }else if(create==3){
                     struct Global_Queue* queue = (struct Global_Queue*)malloc(sizeof(struct Global_Queue));
@@ -652,16 +634,16 @@
                         exit(EXIT_FAILURE);
                     }
                     init_global_queue(queue);
-                    pattern3 (queue, task_func_ptr, m, n, p, execute, parameters);
+                    pattern3 (queue, function_Parameters, execute, parameters);
                     free(queue);
                 }else{
                     exit(EXIT_FAILURE);
                 }
                 double time = omp_get_wtime() - start_time;
                     mean+=time;
-                if(test_tasks!=m){
+                if(test_tasks!=function_Parameters->tasks){
                     if (create!=3){
-                        printf("The number of executed tasks (%d) does not match the required number (%d)\n", test_tasks, m);
+                        printf("The number of executed tasks (%d) does not match the required number (%d)\n", test_tasks, function_Parameters->tasks);
                         exit(EXIT_FAILURE);
                     }
                 }
@@ -711,6 +693,12 @@
             }else{
                 exit(EXIT_FAILURE);
             }
+            struct Function_Parameters* function_Parameters = (struct Function_Parameters*)malloc(sizeof(struct Function_Parameters));
+            function_Parameters->task_func_ptr = task_func_ptr;
+            function_Parameters->tasks=m;
+            function_Parameters->input_size=n;
+            function_Parameters->p=p;
+
             double *A=(double*)malloc(A_size * sizeof(double));
             double *B=(double*)malloc(B_size * sizeof(double));
             double *C=(double*)malloc(C_size * sizeof(double));
@@ -723,7 +711,7 @@
             parameters->A=A;
             parameters->B=B;
             parameters->C=C;
-            executeProgram(task_func_ptr, create, m, n, execute, p, rep, parameters);
+            executeProgram(create, function_Parameters, execute, rep, parameters);
             //print_vector(C, C_size, stdout);
             free_vector(A);
             free_vector(B);
