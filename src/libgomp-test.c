@@ -282,7 +282,7 @@
                     exit(EXIT_FAILURE);
                 }
                 int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
-                if(rank<fp->tasks){
+                if(iteration_end!=0){
                     int start;
                     if(fp->task_func_ptr==&matrixMatrixProduct){
                         start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
@@ -301,10 +301,10 @@
                         local_queue->list_size, iteration_end);
                         exit(EXIT_FAILURE);
                     }
-                    #pragma omp single
-                        start_time = omp_get_wtime();
-                    executeTasks(local_queue, iteration_end, parameters);
                 }
+                #pragma omp single
+                    start_time = omp_get_wtime();
+                executeTasks(local_queue, iteration_end, parameters);
             }
             return omp_get_wtime()-start_time;
         }
@@ -350,51 +350,53 @@
             double start_time = omp_get_wtime();
             #pragma omp parallel num_threads(fp->p)
             {
-
-               int rank=omp_get_thread_num();
-               struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
-               testQueueMemory(local_queue);
-               init_queue(local_queue);
-               #pragma omp for ordered  //add local queues into global one
-                   for (int i=0; i<fp->p; i++) {
-                       #pragma omp ordered
-                       {
-                          pushQueue(global_queue, local_queue);
-                       }
-                   }
-               if(global_queue->list_size!=fp->p){
-                   printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                   global_queue->list_size, fp->p);
-                   exit(EXIT_FAILURE);
-               }
-               int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
-               if(rank<fp->tasks){
-                   int start;
-                   if(fp->task_func_ptr==&matrixMatrixProduct){
-                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
-                   }else{
-                       start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
-                   }
-                   for(int i=0; i<iteration_end; i++){ // add tasks into local queues
-                       if(fp->task_func_ptr==&matrixMatrixProduct){
-                            pushWithLock(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size, fp->input_size);
-                       }else{
-                            pushWithLock(local_queue, fp->task_func_ptr, start+i*fp->input_size, fp->input_size);
-                       }
-                   }
-                   if(iteration_end!=0){
+                int rank=omp_get_thread_num();
+                struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
+                testQueueMemory(local_queue);
+                init_queue(local_queue);
+                #pragma omp for ordered  //add local queues to global one
+                    for (int i=0; i<fp->p; i++) {
+                        #pragma omp ordered
+                        {  //printf("Rank: %d\n", rank);
+                           pushQueue(global_queue, local_queue);
+                        }
+                     }
+                if(global_queue->list_size!=fp->p){
+                    printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
+                    global_queue->list_size, fp->p);
+                    exit(EXIT_FAILURE);
+                }
+                int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
+                if(iteration_end!=0){
+                    int start;
+                    if(fp->task_func_ptr==&matrixMatrixProduct){
+                        start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
+                    }else{
+                        start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
+                    }
+                    for(int i=0; i<iteration_end; i++){ // add tasks to local queues
+                        if(fp->task_func_ptr==&matrixMatrixProduct){
+                             pushWithLock(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size, fp->input_size);
+                        }else{
+                             pushWithLock(local_queue, fp->task_func_ptr, start+i*fp->input_size, fp->input_size);
+                        }
+                    }
+                    if(local_queue->list_size!=iteration_end){
+                        printf("Not all tasks have been added correctly in local_queue pattern2: %d should be %d \n",
+                        local_queue->list_size, iteration_end);
+                        exit(EXIT_FAILURE);
+                    }
                        #pragma omp atomic write
                            local_queue->head->lock=0;
-                   }
-                   #pragma omp single
-                       start_time = omp_get_wtime();
-                   //start executing and stealing
-                   while(local_queue->list_size>0){
+                }
+                #pragma omp single
+                    start_time = omp_get_wtime();
+                while(local_queue->list_size>0){
                         removeTailWithLock(local_queue, parameters);
-                   }
-               }
-               stealTasks(local_queue, global_queue, parameters);
-               //free(local_queue);
+                }
+                if(fp->p<fp->tasks){
+                    stealTasks(local_queue, global_queue, parameters);
+                }
             }
             return omp_get_wtime()-start_time;
         }
@@ -494,7 +496,7 @@
                    exit(EXIT_FAILURE);
                }
                int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
-               if(rank<fp->tasks){
+               if(iteration_end!=0){
                    int start;
                    if(fp->task_func_ptr==&matrixMatrixProduct){
                        start= calculateStart(rank, fp->tasks, fp->p, fp->input_size*fp->input_size);
@@ -517,8 +519,10 @@
                    doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
                    #pragma omp atomic write //unlock tail to make queue ready for execution
                         local_queue->tail->lock=0;
-                   #pragma omp single
-                       start_time = omp_get_wtime();
+               }
+               #pragma omp single
+                   start_time = omp_get_wtime();
+               if(iteration_end!=0){
                    while(local_queue->list_size>0){                   //start executing and stealing
                        removeTailWithLock(local_queue, parameters);
                    }
@@ -579,8 +583,10 @@
                    doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
                    #pragma omp atomic write //unlock tail to make queue ready for execution
                         local_queue->tail->lock=0;
-                   #pragma omp single
-                       start_time = omp_get_wtime();
+               }
+               #pragma omp single
+                   start_time = omp_get_wtime();
+               if(iteration_end!=0){
                    while(local_queue->list_size>0){
                        removeTailWithLock(local_queue, parameters);
                    }
