@@ -13,7 +13,8 @@
         /**
             * @brief test if threads execute the tasks correctly
         */
-        int test_tasks;
+        int executed_tasks;
+        int total_number_of_tasks;
 
         /**
             * @brief parameters used in all patterns
@@ -112,7 +113,7 @@
          */
         void vectorVectorSum (int n, struct Parameters* parameters, int start){
             #pragma omp atomic update
-                test_tasks++;
+                executed_tasks++;
             for (int i = start; i < start+n; ++i){
                 parameters->C[i] = parameters->A[i] + parameters->B[i];
             }
@@ -126,7 +127,7 @@
         */
         void matrixVectorProduct (int n, struct Parameters* parameters,  int start){
             #pragma omp atomic update
-                test_tasks++;
+                executed_tasks++;
             for(int i=0;i<n;i++) {
               parameters->C[start+i]=0;
               for(int j=0;j<n;j++) {
@@ -143,7 +144,7 @@
         */
         void matrixMatrixProduct(int n, struct Parameters* parameters,  int start){
             #pragma omp atomic update
-                test_tasks++;
+                executed_tasks++;
             for (int i=0; i<n; i=i+1){
                 for (int j=0; j<n; j=j+1){
                         parameters->C[start+i*n+j]=0.0;
@@ -438,9 +439,8 @@
                 else{
                     pushBeforeNode(local_queue, current_Node, current_Node->start, 1);
                 }
-                int task_increment=local_queue->list_size/2; //Nodes doubled -> halve of the list is new and must be added
                 #pragma omp atomic update
-                test_tasks = test_tasks + task_increment;
+                    total_number_of_tasks+=1;
                 current_Node=current_Node->next;
             }
         }
@@ -631,7 +631,8 @@
             double execution_mean=0;
             double execution_time=0;
             for(int i=0; i<rep; i++){
-                test_tasks=0;
+                executed_tasks=0;
+                total_number_of_tasks=function_Parameters->tasks;;
                 if(create==1){
                     struct Queue* queue = (struct Queue*)malloc(sizeof(struct Queue));
                     testQueueMemory(queue);
@@ -660,11 +661,13 @@
                     exit(EXIT_FAILURE);
                 }
                 execution_mean+=execution_time;
-                if(test_tasks!=function_Parameters->tasks){
-                    if (create!=3 && !(create == 1 && execute ==2)){
-                        printf("The number of executed tasks (%d) does not match the required number (%d)\n", test_tasks, function_Parameters->tasks);
+                if(executed_tasks!=total_number_of_tasks){
+                    if (!(create == 1 && execute ==2)){
+                        printf("The number of executed tasks (%d) does not match the required number (%d)\n", executed_tasks, total_number_of_tasks);
                         exit(EXIT_FAILURE);
                     }
+                }else{
+                    printf("Number of executed tasks: %d\n", executed_tasks);
                 }
             }
             /*int create, struct Function_Parameters* function_Parameters, int execute,
