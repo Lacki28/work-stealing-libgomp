@@ -176,41 +176,11 @@
         }
 
         /**
-            * @brief add queue
-            * @details insert a local queue into the global queue
-            * @param global_queue queue to which the new queue is added
-            * @param local_queue local queue of one thread
-        */
-        void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue){
-            local_queue->prev_queue = NULL;
-            if(global_queue->head_queue==NULL){
-                local_queue->next_queue = NULL;
-                global_queue->tail_queue = local_queue;
-            }else{
-                (global_queue->head_queue)->prev_queue = local_queue;
-                local_queue->next_queue = global_queue->head_queue;
-            }
-            global_queue->head_queue = local_queue;
-            global_queue->list_size = global_queue->list_size+1;
-        }
-
-        /**
             * @brief initialize queue
             * @param queue queue to initialize
         */
         void init_queue(struct Queue* queue){
             queue->head = NULL;
             queue->tail = NULL;
-            queue->next_queue = NULL;
-            queue->prev_queue = NULL;
-            queue->list_size=0;
-        }
-
-        /**
-            * @brief initialize global queue
-            * @param queue global queue to initialize
-        */
-        void init_global_queue(struct Global_Queue* queue){
-            queue->head_queue = NULL;
             queue->list_size=0;
         }

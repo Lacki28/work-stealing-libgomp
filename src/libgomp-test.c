@@ -258,11 +258,11 @@
             * @brief execute tasks that are stored in local queues
             * @details Each thread creates its own queue in which the tasks are stored for later execution.
             * Without the need for synchronization, the threads then perform the tasks of their own queues.
-            * @param queue global queue used by all threads
+            * @param global_array global array used by all threads
             * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        double pattern2WithoutWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+        double pattern2WithoutWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters){
             double start_time = omp_get_wtime();
             #pragma omp parallel num_threads(fp->p)
             {
@@ -270,18 +270,13 @@
                 struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                 testQueueMemory(local_queue);
                 init_queue(local_queue);
-                #pragma omp for ordered  //add local queues to global one
+                #pragma omp for ordered  //add local queues to global array
                     for (int i=0; i<fp->p; i++) {
                         #pragma omp ordered
                         {  //printf("Rank: %d\n", rank);
-                           pushQueue(global_queue, local_queue);
+                           global_array[i] = *local_queue;
                         }
-                     }
-                if(global_queue->list_size!=fp->p){
-                    printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                    global_queue->list_size, fp->p);
-                    exit(EXIT_FAILURE);
-                }
+                    }
                 int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
                 if(iteration_end!=0){
                     int start;
@@ -310,29 +305,29 @@
             return omp_get_wtime()-start_time;
         }
 
-        void stealTasks(struct Queue* local_queue, struct Global_Queue* global_queue, struct Parameters* parameters){
+        void stealTasks(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id){
             //steal from previous node
-            if(local_queue==global_queue->head_queue){
-                while(global_queue->tail_queue->list_size>1){
+            if(local_queue == &global_array[0]){
+                while(global_array[p-1].list_size>1){
                     //printf("STEALING prev: %d\n", omp_get_thread_num());
-                    removeTailWithLock(global_queue->tail_queue, parameters);
+                    removeTailWithLock(&global_array[p-1], parameters);
                 }
             }else{
-                while(local_queue->prev_queue->list_size>1){
+                while(global_array[id-1].list_size>1){
                     //printf("STEALING prev: %d\n", omp_get_thread_num());
-                    removeTailWithLock(local_queue->prev_queue, parameters);
+                    removeTailWithLock(&global_array[id-1], parameters);
                 }
             }
             //steal from next node
-            if(local_queue==global_queue->tail_queue){
-                while(global_queue->head_queue->list_size>1){
+            if(local_queue==&global_array[p-1]){
+                while(global_array[0].list_size>1){
                    //printf("STEALING next: %d\n", omp_get_thread_num());
-                   removeTailWithLock(global_queue->head_queue, parameters);
+                   removeTailWithLock(&global_array[0], parameters);
                 }
             }else{
-                while(local_queue->next_queue->list_size>1){
+                while(global_array[id+1].list_size>1){
                     //printf("STEALING next: %d\n", omp_get_thread_num());
-                    removeTailWithLock(local_queue->next_queue, parameters);
+                    removeTailWithLock(&global_array[id+1], parameters);
                 }
             }
         }
@@ -343,11 +338,11 @@
             * The queues of all threads are stored in a global queue that each thread can access.
             * After one thread has completed its own tasks it then tries to steal tasks from neighboring threads if possible
             * and executes the stoles tasks.
-            * @param queue global queue used by all threads
+            * @param global_array global array used by all threads
             * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        double pattern2WithWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+        double pattern2WithWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters){
             double start_time = omp_get_wtime();
             #pragma omp parallel num_threads(fp->p)
             {
@@ -355,18 +350,13 @@
                 struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                 testQueueMemory(local_queue);
                 init_queue(local_queue);
-                #pragma omp for ordered  //add local queues to global one
+                #pragma omp for ordered  //add local queues to global array
                     for (int i=0; i<fp->p; i++) {
                         #pragma omp ordered
-                        {  //printf("Rank: %d\n", rank);
-                           pushQueue(global_queue, local_queue);
+                        {
+                           global_array[i] = *local_queue;
                         }
-                     }
-                if(global_queue->list_size!=fp->p){
-                    printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                    global_queue->list_size, fp->p);
-                    exit(EXIT_FAILURE);
-                }
+                    }
                 int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
                 if(iteration_end!=0){
                     int start;
@@ -396,7 +386,7 @@
                         removeTailWithLock(local_queue, parameters);
                 }
                 if(fp->p<fp->tasks){
-                    stealTasks(local_queue, global_queue, parameters);
+                   // stealTasks(local_queue, global_array, parameters, fp->p, rank);
                 }
             }
             return omp_get_wtime()-start_time;
@@ -405,16 +395,16 @@
         /**
             * @brief execute pattern2: local queues
             * @details execute pattern2 with or without work stealing
-            * @param queue global queue used by all threads
+            * @param global_array global array used by all threads
             * @param function_Parameters parameters all patterns use
             * @param e specify whether work stealing is used
             * @param parameters input for the tasks
         */
-        double pattern2(struct Global_Queue* global_queue, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
+        double pattern2(struct Queue* global_array, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
                 if(e==1){ //No work stealing
-                    return pattern2WithoutWorkStealing(global_queue,function_Parameters, parameters);
+                    return pattern2WithoutWorkStealing(global_array,function_Parameters, parameters);
                 }else if (e==2){
-                    return pattern2WithWorkStealing(global_queue, function_Parameters, parameters);
+                    return pattern2WithWorkStealing(global_array, function_Parameters, parameters);
                 }else{
                     exit(EXIT_FAILURE);
                 }
@@ -471,11 +461,11 @@
             * The queues of all threads are stored in a global queue that each thread can access.
             * After one thread has completed building its queue with all nodes having an input size below a certain threshold it then executes
             * its own tasks.
-            * @param queue global queue used by all threads
+            * @param global_array global array used by all threads
             * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        double pattern3WithoutWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+        double pattern3WithoutWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters){
              double start_time = omp_get_wtime();
              #pragma omp parallel num_threads(fp->p)
             {
@@ -483,18 +473,13 @@
                struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                testQueueMemory(local_queue);
                init_queue(local_queue);
-               #pragma omp for ordered  //add local queues into global one
+               #pragma omp for ordered  //add local queues to global array
                    for (int i=0; i<fp->p; i++) {
                        #pragma omp ordered
                        {
-                          pushQueue(global_queue, local_queue);
+                          global_array[i] = *local_queue;
                        }
                    }
-               if(global_queue->list_size!=fp->p){
-                   printf("Not all tasks have been added correctly in global_queue pattern2: %d should be %d\n",
-                   global_queue->list_size, fp->p);
-                   exit(EXIT_FAILURE);
-               }
                int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
                if(iteration_end!=0){
                    int start;
@@ -539,11 +524,11 @@
             * After one thread has completed building its queue with all nodes having an input size below a certain threshold it then executes
             * its own tasks and afterwards tries to steal tasks from neighboring threads if possible
             * and executes the stoles tasks.
-            * @param queue global queue used by all threads
+            * @param global_array global array used by all threads
             * @param fp parameters all patterns use
             * @param parameters input for the tasks
         */
-        double pattern3WithWorkStealing(struct Global_Queue* global_queue, struct Function_Parameters* fp, struct Parameters* parameters){
+        double pattern3WithWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters){
             double start_time = omp_get_wtime();
             #pragma omp parallel num_threads(fp->p)
             {
@@ -551,18 +536,13 @@
                struct Queue* local_queue = (struct Queue*)malloc(sizeof(struct Queue));
                testQueueMemory(local_queue);
                init_queue(local_queue);
-               #pragma omp for ordered  //add local queues into global one
-                   for (int i=0; i<fp->p; i++) {
-                       #pragma omp ordered
-                       {
-                          pushQueue(global_queue, local_queue);
-                       }
-                   }
-               if(global_queue->list_size!=fp->p){
-                   printf("Not all tasks have been added correctly in global_queue pattern3: %d should be %d\n",
-                   global_queue->list_size, fp->p);
-                   exit(EXIT_FAILURE);
-               }
+               #pragma omp for ordered  //add local queues to global array
+                    for (int i=0; i<fp->p; i++) {
+                        #pragma omp ordered
+                        {
+                            global_array[i] = *local_queue;
+                        }
+                    }
                int iteration_end = (fp->tasks%fp->p)>rank ? (fp->tasks/fp->p)+1 : fp->tasks/fp->p;
                if(rank<fp->tasks){
                    int start;
@@ -590,7 +570,7 @@
                    while(local_queue->list_size>0){
                        removeTailWithLock(local_queue, parameters);
                    }
-                   stealTasks(local_queue, global_queue, parameters);
+                  // stealTasks(local_queue, global_array, parameters, fp->p, rank);
                }
             }
             return omp_get_wtime()-start_time;
@@ -605,12 +585,12 @@
             * @param e specify whether work stealing is used
             * @param parameters input for the tasks
         */
-        double pattern3(struct Global_Queue* global_queue, struct Function_Parameters* function_Parameters,
+        double pattern3(struct Queue* global_array, struct Function_Parameters* function_Parameters,
          int e, struct Parameters* parameters){
             if(e==1){ //No work stealing //TODO CHANGE
-                return pattern3WithoutWorkStealing(global_queue, function_Parameters, parameters);
+                return pattern3WithoutWorkStealing(global_array, function_Parameters, parameters);
             }else if (e==2){ //Random selection - select one - threshold...
-                return pattern3WithWorkStealing(global_queue, function_Parameters, parameters);
+                return pattern3WithWorkStealing(global_array, function_Parameters, parameters);
             }else{
                 exit(EXIT_FAILURE);
             }
@@ -640,23 +620,21 @@
                     execution_time=pattern1 (queue, function_Parameters, execute, parameters);
                     free(queue);
                 }else if(create==2){ //TODO: threshold
-                    struct Global_Queue* queue = (struct Global_Queue*)malloc(sizeof(struct Global_Queue));
-                    if( queue == NULL ) {
+                    struct Queue *global_array = malloc(function_Parameters->p * sizeof(struct Queue));
+                    if( global_array == NULL ) {
                         printf("malloc failed - Not enough memory");
                         exit(EXIT_FAILURE);
                     }
-                    init_global_queue(queue);
-                    execution_time=pattern2 (queue, function_Parameters, execute, parameters);
-                    free(queue);
+                    execution_time=pattern2(global_array, function_Parameters, execute, parameters);
+                    free(global_array);
                 }else if(create==3){
-                    struct Global_Queue* queue = (struct Global_Queue*)malloc(sizeof(struct Global_Queue));
-                    if( queue == NULL ) {
+                    struct Queue *global_array = malloc(function_Parameters->p * sizeof(struct Queue));
+                    if( global_array == NULL ) {
                         printf("malloc failed - Not enough memory");
                         exit(EXIT_FAILURE);
                     }
-                    init_global_queue(queue);
-                    execution_time=pattern3 (queue, function_Parameters, execute, parameters);
-                    free(queue);
+                    execution_time=pattern3 (global_array, function_Parameters, execute, parameters);
+                    free(global_array);
                 }else{
                     exit(EXIT_FAILURE);
                 }

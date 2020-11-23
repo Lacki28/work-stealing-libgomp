@@ -67,29 +67,12 @@
         int list_size;
         struct Node* head;
         struct Node* tail;
-        struct Queue* next_queue;
-        struct Queue* prev_queue;
     };
 
-    /**
-        * @brief queue which is used as a global queue
-        * @details queue points to head and tail of its local queues
-        * @element list_size size of its elements/queues
-        * @element head_queue points to the first queue
-        * @element tail_queue points to the last queue
-
-    */
-    struct Global_Queue {
-        int list_size;
-        struct Queue* head_queue;
-        struct Queue* tail_queue;
-    };
 
     //Description can be found in queue.c
     void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
     void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
     void pushBeforeNode(struct Queue* queue, struct Node* node, int start, int task_complexity);
     void removeTailWithLock(struct Queue* queue, struct Parameters* parameters);
-    void pushQueue(struct Global_Queue* global_queue, struct Queue* local_queue);
     void init_queue(struct Queue* queue);
-    void init_global_queue(struct Global_Queue* queue);
