@@ -126,7 +126,7 @@
             * @param queue queue from which the nodes are taken
             * @param parameters parameter for executing tasks
         */
-        void removeTailWithLock(struct Queue* queue, struct Parameters* parameters){
+        void removeTailWithLock(struct Queue* queue, struct Parameters* parameters, int steal_size){
             #pragma omp critical//Only one task can steal from this queue
             {
                 if(queue->tail->lock==0){
@@ -138,17 +138,11 @@
                 #pragma omp atomic read
                     list_size=queue->list_size;
                 if(list_size!=0){
-                    int tasks_to_steal;
-                    if(list_size>8){
-                        tasks_to_steal = list_size/2;
-                    }else{
-                        tasks_to_steal=list_size;
-                    }
                     struct Node* old_tail = queue->tail;
                     struct Node* helpNode = queue->tail;
                     int stolen_tasks=0;
                     int locked;
-                    for(;stolen_tasks<tasks_to_steal && stolen_tasks<list_size;stolen_tasks++){
+                    for(;stolen_tasks<steal_size && stolen_tasks<list_size;stolen_tasks++){
                         #pragma omp atomic write
                             locked = helpNode->lock;
                         if(locked==1){

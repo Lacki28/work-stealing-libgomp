@@ -15,6 +15,7 @@
         */
         int executed_tasks;
         int total_number_of_tasks;
+        int all_queues_empty;
 
         /**
             * @brief parameters used in all patterns
@@ -226,7 +227,7 @@
         double pattern1(struct Queue* queue, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
             if(e==1){ //No work stealing
                 return pattern1WithoutWorkStealing(queue, function_Parameters, parameters);
-            }else if (e==2){
+            }else if (e==2||e==3||e==4||e==5){
                 //work stealing
                 return 0;
             }else{
@@ -305,33 +306,42 @@
             return omp_get_wtime()-start_time;
         }
 
-        void stealTasks(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id){
-            //steal from previous node
-            if(local_queue == &global_array[0]){
-                while(global_array[p-1].list_size>1){
-                    //printf("STEALING prev: %d\n", omp_get_thread_num());
-                    removeTailWithLock(&global_array[p-1], parameters);
-                }
-            }else{
-                while(global_array[id-1].list_size>1){
-                    //printf("STEALING prev: %d\n", omp_get_thread_num());
-                    removeTailWithLock(&global_array[id-1], parameters);
+        void stealTasks(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
+            if(e==2){
+                while(all_queues_empty!=0){
+                int thread_to_steal_from =  rand() % p;
+                    if(global_array[thread_to_steal_from].list_size!=0){
+                       removeTailWithLock(&global_array[thread_to_steal_from], parameters, 1);
+                    }
                 }
             }
-            //steal from next node
-            if(local_queue==&global_array[p-1]){
-                while(global_array[0].list_size>1){
-                   //printf("STEALING next: %d\n", omp_get_thread_num());
-                   removeTailWithLock(&global_array[0], parameters);
-                }
-            }else{
-                while(global_array[id+1].list_size>1){
-                    //printf("STEALING next: %d\n", omp_get_thread_num());
-                    removeTailWithLock(&global_array[id+1], parameters);
+            else{
+                while(all_queues_empty!=0){
+                    int thread_to_steal_from =  rand() % p;
+                    if(global_array[thread_to_steal_from].list_size!=0){
+                       removeTailWithLock(&global_array[thread_to_steal_from], parameters, global_array[thread_to_steal_from].list_size/2);
+                    }
                 }
             }
         }
 
+        void stealTasksFromTwo(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
+            int steal_size=1;
+            while(all_queues_empty!=0){
+                int thread_to_steal_from1 =  rand() % p;
+                int thread_to_steal_from2 =  rand() % p;
+                int max_queue=0;
+                if(global_array[thread_to_steal_from1].list_size>=global_array[thread_to_steal_from2].list_size){
+                    max_queue=thread_to_steal_from1;
+                }
+                if(global_array[max_queue].list_size!=0){
+                    if(e==5){
+                        steal_size=global_array[max_queue].list_size/2;
+                    }
+                    removeTailWithLock(&global_array[max_queue], parameters, steal_size);
+                }
+            }
+        }
          /**
             * @brief execute tasks stored in local queues and steal tasks from neighboring threads if possible
             * @details Each thread creates its own queue in which the tasks are stored for later execution.
@@ -341,8 +351,9 @@
             * @param global_array global array used by all threads
             * @param fp parameters all patterns use
             * @param parameters input for the tasks
+            * @param e indicates which work stealing method is used
         */
-        double pattern2WithWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters){
+        double pattern2WithWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters, int e){
             double start_time = omp_get_wtime();
             #pragma omp parallel num_threads(fp->p)
             {
@@ -383,10 +394,15 @@
                 #pragma omp single
                     start_time = omp_get_wtime();
                 while(local_queue->list_size>0){
-                        removeTailWithLock(local_queue, parameters);
+                    removeTailWithLock(local_queue, parameters, 1);
                 }
+                #pragma omp atomic update
+                    all_queues_empty--;
                 if(fp->p<fp->tasks){
-                   // stealTasks(local_queue, global_array, parameters, fp->p, rank);
+                    if(e==2||e==3)
+                        stealTasks(local_queue, global_array, parameters, fp->p, rank, e);
+                    else
+                        stealTasksFromTwo(local_queue, global_array, parameters, fp->p, rank, e);
                 }
             }
             return omp_get_wtime()-start_time;
@@ -403,8 +419,8 @@
         double pattern2(struct Queue* global_array, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
                 if(e==1){ //No work stealing
                     return pattern2WithoutWorkStealing(global_array,function_Parameters, parameters);
-                }else if (e==2){
-                    return pattern2WithWorkStealing(global_array, function_Parameters, parameters);
+                }else if (e==2||e==3||e==4||e==5){
+                    return pattern2WithWorkStealing(global_array, function_Parameters, parameters, e);
                 }else{
                     exit(EXIT_FAILURE);
                 }
@@ -509,7 +525,7 @@
                    start_time = omp_get_wtime();
                if(iteration_end!=0){
                    while(local_queue->list_size>0){                   //start executing and stealing
-                       removeTailWithLock(local_queue, parameters);
+                       removeTailWithLock(local_queue, parameters, 1);
                    }
                }
             }
@@ -527,8 +543,9 @@
             * @param global_array global array used by all threads
             * @param fp parameters all patterns use
             * @param parameters input for the tasks
+            * @param e indicates which work stealing method is used
         */
-        double pattern3WithWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters){
+        double pattern3WithWorkStealing(struct Queue* global_array, struct Function_Parameters* fp, struct Parameters* parameters, int e){
             double start_time = omp_get_wtime();
             #pragma omp parallel num_threads(fp->p)
             {
@@ -568,9 +585,14 @@
                    start_time = omp_get_wtime();
                if(iteration_end!=0){
                    while(local_queue->list_size>0){
-                       removeTailWithLock(local_queue, parameters);
+                       removeTailWithLock(local_queue, parameters, 1);
                    }
-                  // stealTasks(local_queue, global_array, parameters, fp->p, rank);
+                   #pragma omp atomic update
+                        all_queues_empty--;
+                   if(e==2||e==3)
+                       stealTasks(local_queue, global_array, parameters, fp->p, rank, e);
+                   else
+                       stealTasksFromTwo(local_queue, global_array, parameters, fp->p, rank, e);
                }
             }
             return omp_get_wtime()-start_time;
@@ -587,10 +609,10 @@
         */
         double pattern3(struct Queue* global_array, struct Function_Parameters* function_Parameters,
          int e, struct Parameters* parameters){
-            if(e==1){ //No work stealing //TODO CHANGE
+            if(e==1){
                 return pattern3WithoutWorkStealing(global_array, function_Parameters, parameters);
-            }else if (e==2){ //Random selection - select one - threshold...
-                return pattern3WithWorkStealing(global_array, function_Parameters, parameters);
+            }else if (e==2||e==3||e==4||e==5){
+                return pattern3WithWorkStealing(global_array, function_Parameters, parameters, e);
             }else{
                 exit(EXIT_FAILURE);
             }
@@ -612,6 +634,7 @@
             double execution_time=0;
             for(int i=0; i<rep; i++){
                 executed_tasks=0;
+                all_queues_empty = function_Parameters->p;
                 total_number_of_tasks=function_Parameters->tasks;;
                 if(create==1){
                     struct Queue* queue = (struct Queue*)malloc(sizeof(struct Queue));
@@ -619,7 +642,7 @@
                     init_queue(queue);
                     execution_time=pattern1 (queue, function_Parameters, execute, parameters);
                     free(queue);
-                }else if(create==2){ //TODO: threshold
+                }else if(create==2){
                     struct Queue *global_array = malloc(function_Parameters->p * sizeof(struct Queue));
                     if( global_array == NULL ) {
                         printf("malloc failed - Not enough memory");
@@ -648,8 +671,6 @@
                     printf("Number of executed tasks: %d\n", executed_tasks);
                 }
             }
-            /*int create, struct Function_Parameters* function_Parameters, int execute,
-                      int rep, struct Parameters* parameters*/
             int i=0;
             if(function_Parameters->task_func_ptr == &vectorVectorSum){
                 i=1;
@@ -662,7 +683,7 @@
               function_Parameters->tasks, function_Parameters->input_size, (execution_mean/rep));
         }
 
-    //Original function is taken from Parallel Computing (184.710)
+        //Original function is taken from Parallel Computing (184.710)
             void print_vector(double* m, int n, FILE *out) {
               for(int i=0; i<n; i++) {
                   fprintf(out, "%8.4f ", m[i]);
@@ -670,7 +691,8 @@
               printf("%d", omp_get_thread_num());
               fprintf(out, "\n");
             }
-         /**
+
+        /**
             * @brief create parameters for the program and execute it
             * @param create specify which pattern will be used
             * @param m amount of tasks that have to be executed
