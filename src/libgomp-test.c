@@ -311,7 +311,7 @@
                 while(all_queues_empty!=0){
                 int thread_to_steal_from =  rand() % p;
                     if(global_array[thread_to_steal_from].list_size!=0){
-                       removeTailWithLock(&global_array[thread_to_steal_from], parameters, 1);
+                       removeTasksWithLock(&global_array[thread_to_steal_from], parameters, 1, 0);
                     }
                 }
             }
@@ -319,14 +319,17 @@
                 while(all_queues_empty!=0){
                     int thread_to_steal_from =  rand() % p;
                     if(global_array[thread_to_steal_from].list_size!=0){
-                       removeTailWithLock(&global_array[thread_to_steal_from], parameters, global_array[thread_to_steal_from].list_size/2);
+                       removeTasksWithLock(&global_array[thread_to_steal_from], parameters, global_array[thread_to_steal_from].list_size/2, 0);
                     }
                 }
             }
         }
 
         void stealTasksFromTwo(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
-            int steal_size=1;
+           int steal_size=1;
+           if(e==5){
+               steal_size=global_array[max_queue].list_size/2;
+           }
             while(all_queues_empty!=0){
                 int thread_to_steal_from1 =  rand() % p;
                 int thread_to_steal_from2 =  rand() % p;
@@ -335,10 +338,7 @@
                     max_queue=thread_to_steal_from1;
                 }
                 if(global_array[max_queue].list_size!=0){
-                    if(e==5){
-                        steal_size=global_array[max_queue].list_size/2;
-                    }
-                    removeTailWithLock(&global_array[max_queue], parameters, steal_size);
+                    removeTasksWithLock(&global_array[max_queue], parameters, steal_size, 0);
                 }
             }
         }
@@ -394,7 +394,7 @@
                 #pragma omp single
                     start_time = omp_get_wtime();
                 while(local_queue->list_size>0){
-                    removeTailWithLock(local_queue, parameters, 1);
+                    removeTasksWithLock(local_queue, parameters, 1, 1);
                 }
                 #pragma omp atomic update
                     all_queues_empty--;
@@ -525,7 +525,7 @@
                    start_time = omp_get_wtime();
                if(iteration_end!=0){
                    while(local_queue->list_size>0){                   //start executing and stealing
-                       removeTailWithLock(local_queue, parameters, 1);
+                       removeTasksWithLock(local_queue, parameters, 1, 1);
                    }
                }
             }
@@ -585,7 +585,7 @@
                    start_time = omp_get_wtime();
                if(iteration_end!=0){
                    while(local_queue->list_size>0){
-                       removeTailWithLock(local_queue, parameters, 1);
+                       removeTasksWithLock(local_queue, parameters, 1, 1);
                    }
                    #pragma omp atomic update
                         all_queues_empty--;

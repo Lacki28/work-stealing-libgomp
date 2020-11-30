@@ -122,18 +122,23 @@
 
         /**
             * @brief remove nodes in critical section
-            * @details remove nodes at the end of the list, lock tail, so that no other thread can access it while removing tasks
+            * @details remove nodes at the end or beginning of the list, lock tail or head, so that no other thread can access it while removing tasks
             * @param queue queue from which the nodes are taken
             * @param parameters parameter for executing tasks
+            * @param head if head=1 remove head, if head=0 steal from queue
         */
-        void removeTailWithLock(struct Queue* queue, struct Parameters* parameters, int steal_size){
+        void removeTasksWithLock(struct Queue* queue, struct Parameters* parameters, int steal_size, int head){
             #pragma omp critical//Only one task can steal from this queue
             {
-                if(queue->tail->lock==0){
+                if(head==0 && queue->tail->lock==0){
                     queue->tail->lock=omp_get_thread_num()+2;
+                }else if(head==1 && queue->head->next== NULL){
+                    queue->head->lock=1;
+                }else if(head==1 && queue->head->next!= NULL && queue->head->next->lock==0){
+                    queue->head->next->lock=1;
                 }
             }
-            if(queue->tail->lock==omp_get_thread_num()+2){
+            if(head==0 && queue->tail->lock==omp_get_thread_num()+2){
                 int list_size;
                 #pragma omp atomic read
                     list_size=queue->list_size;
@@ -150,7 +155,7 @@
                         }
                         helpNode=helpNode->prev;
                     }
-                    #pragma omp atomic
+                    #pragma omp atomic write
                     queue->list_size = (queue->list_size)-stolen_tasks;
                     if(queue->list_size!=0){
                         helpNode->next->prev=NULL; //separate both
@@ -164,9 +169,21 @@
                         old_tail=old_tail->prev;
                     }
                 }
-
+            }if(head==1&&queue->head->next==NULL){
+                #pragma omp atomic update
+                    queue->list_size--;
+                    (* queue->head->task)(queue->head->input_size, parameters, queue->head->start); //execute task
+            } else if(head==1 && queue->head->next->lock==1){
+                 struct Node* workNode = queue->head;
+                 queue->head->next->prev=NULL;
+                 #pragma omp atomic write
+                    queue->head=queue->head->next;
+                 #pragma omp atomic write
+                    queue->head->lock=0;
+                 #pragma omp atomic update
+                    queue->list_size--;
+                 (* workNode->task)(workNode->input_size, parameters, workNode->start); //execute task
             }
-
         }
 
         /**

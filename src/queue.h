@@ -74,5 +74,5 @@
     void push(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
     void pushWithLock(struct Queue* queue, void (*task)(int, Parameters*, int), int start, int input_size);
     void pushBeforeNode(struct Queue* queue, struct Node* node, int start, int task_complexity);
-    void removeTailWithLock(struct Queue* queue, struct Parameters* parameters, int steal_size);
+    void removeTasksWithLock(struct Queue* queue, struct Parameters* parameters, int steal_size, int head);
     void init_queue(struct Queue* queue);
