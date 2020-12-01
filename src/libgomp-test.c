@@ -326,11 +326,8 @@
         }
 
         void stealTasksFromTwo(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
-           int steal_size=1;
-           if(e==5){
-               steal_size=global_array[max_queue].list_size/2;
-           }
             while(all_queues_empty!=0){
+                int steal_size=1;
                 int thread_to_steal_from1 =  rand() % p;
                 int thread_to_steal_from2 =  rand() % p;
                 int max_queue=0;
@@ -338,10 +335,14 @@
                     max_queue=thread_to_steal_from1;
                 }
                 if(global_array[max_queue].list_size!=0){
+                    if(e==5){
+                       steal_size=global_array[max_queue].list_size/2;
+                    }
                     removeTasksWithLock(&global_array[max_queue], parameters, steal_size, 0);
                 }
             }
         }
+
          /**
             * @brief execute tasks stored in local queues and steal tasks from neighboring threads if possible
             * @details Each thread creates its own queue in which the tasks are stored for later execution.
