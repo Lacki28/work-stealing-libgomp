@@ -388,8 +388,8 @@
                         local_queue->list_size, iteration_end);
                         exit(EXIT_FAILURE);
                     }
-                       #pragma omp atomic write
-                           local_queue->head->lock=0;
+                    #pragma omp atomic write
+                        local_queue->head->lock=0;
                 }
                 #pragma omp single
                     start_time = omp_get_wtime();

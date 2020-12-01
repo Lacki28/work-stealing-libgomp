@@ -133,7 +133,9 @@
                 if(head==0 && queue->tail->lock==0){
                     queue->tail->lock=omp_get_thread_num()+2;
                 }else if(head==1 && queue->head->next== NULL){
-                    queue->head->lock=1;
+                    if(queue->head->lock==0){
+                        queue->head->lock=1;
+                    }
                 }else if(head==1 && queue->head->next!= NULL && queue->head->next->lock==0){
                     queue->head->next->lock=1;
                 }
@@ -169,10 +171,10 @@
                         old_tail=old_tail->prev;
                     }
                 }
-            }if(head==1&&queue->head->next==NULL){
+            }if(head==1&&queue->head->next==NULL&&queue->head->lock==1){
                 #pragma omp atomic update
                     queue->list_size--;
-                    (* queue->head->task)(queue->head->input_size, parameters, queue->head->start); //execute task
+                (* queue->head->task)(queue->head->input_size, parameters, queue->head->start); //execute task
             } else if(head==1 && queue->head->next->lock==1){
                  struct Node* workNode = queue->head;
                  queue->head->next->prev=NULL;
