@@ -306,7 +306,16 @@
             return omp_get_wtime()-start_time;
         }
 
-        void stealTasks(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
+        /**
+            * @brief steal tasks
+            * @details randomly choose one queue to steal from
+            * @param global_array stores the local queues of all tasks
+            * @param parameters input for the tasks
+            * @param p number of threads
+            * @param id of the thread
+            * @param e specifies the steal strategy
+        */
+        void stealTasks(struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
             if(e==2){
                 while(all_queues_empty!=0){
                 int thread_to_steal_from =  rand() % p;
@@ -325,7 +334,16 @@
             }
         }
 
-        void stealTasksFromTwo(struct Queue* local_queue, struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
+         /**
+            * @brief steal tasks
+            * @details randomly select two queues and steal tasks from the queue with more tasks
+            * @param global_array stores the local queues of all tasks
+            * @param parameters input for the tasks
+            * @param p number of threads
+            * @param id of the thread
+            * @param e specifies the steal strategy
+        */
+        void stealTasksFromTwo(struct Queue *global_array, struct Parameters* parameters, int p, int id, int e){
             while(all_queues_empty!=0){
                 int steal_size=1;
                 int thread_to_steal_from1 =  rand() % p;
@@ -389,8 +407,6 @@
                         local_queue->list_size, iteration_end);
                         exit(EXIT_FAILURE);
                     }
-                    #pragma omp atomic write
-                        local_queue->head->lock=0;
                 }
                 #pragma omp single
                     start_time = omp_get_wtime();
@@ -401,9 +417,9 @@
                     all_queues_empty--;
                 if(fp->p<fp->tasks){
                     if(e==2||e==3)
-                        stealTasks(local_queue, global_array, parameters, fp->p, rank, e);
+                        stealTasks(global_array, parameters, fp->p, rank, e);
                     else
-                        stealTasksFromTwo(local_queue, global_array, parameters, fp->p, rank, e);
+                        stealTasksFromTwo(global_array, parameters, fp->p, rank, e);
                 }
             }
             return omp_get_wtime()-start_time;
@@ -418,12 +434,12 @@
             * @param parameters input for the tasks
         */
         double pattern2(struct Queue* global_array, struct Function_Parameters* function_Parameters, int e, struct Parameters* parameters){
-                if(e==1){ //No work stealing
-                    return pattern2WithoutWorkStealing(global_array,function_Parameters, parameters);
-                }else if (e==2||e==3||e==4||e==5){
-                    return pattern2WithWorkStealing(global_array, function_Parameters, parameters, e);
-                }else{
-                    exit(EXIT_FAILURE);
+            if(e==1){ //No work stealing
+                return pattern2WithoutWorkStealing(global_array,function_Parameters, parameters);
+            }else if (e==2||e==3||e==4||e==5){
+                return pattern2WithWorkStealing(global_array, function_Parameters, parameters, e);
+            }else{
+                exit(EXIT_FAILURE);
                 }
         }
 
@@ -505,8 +521,7 @@
                    }else{
                        start= calculateStart(rank, fp->tasks, fp->p, fp->input_size);
                    }
-                   pushWithLock(local_queue, fp->task_func_ptr, start, fp->input_size);//lock tail
-                   for(int i=1; i<iteration_end; i++){ // add tasks into local queues
+                   for(int i=0; i<iteration_end; i++){ // add tasks into local queues
                        if(fp->task_func_ptr==&matrixMatrixProduct){
                             push(local_queue, fp->task_func_ptr, start+i*fp->input_size*fp->input_size,fp->input_size);
                        }else{
@@ -519,16 +534,10 @@
                        exit(EXIT_FAILURE);
                    } //split tasks
                    doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
-                   #pragma omp atomic write //unlock tail to make queue ready for execution
-                        local_queue->tail->lock=0;
                }
                #pragma omp single
                    start_time = omp_get_wtime();
-               if(iteration_end!=0){
-                   while(local_queue->list_size>0){                   //start executing and stealing
-                       removeTasksWithLock(local_queue, parameters, 1, 1);
-                   }
-               }
+               executeTasks(local_queue, iteration_end, parameters);
             }
             return omp_get_wtime()-start_time;
         }
@@ -579,8 +588,6 @@
                    }
                    //start executing and stealing
                    doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
-                   #pragma omp atomic write //unlock tail to make queue ready for execution
-                        local_queue->tail->lock=0;
                }
                #pragma omp single
                    start_time = omp_get_wtime();
@@ -591,9 +598,9 @@
                    #pragma omp atomic update
                         all_queues_empty--;
                    if(e==2||e==3)
-                       stealTasks(local_queue, global_array, parameters, fp->p, rank, e);
+                       stealTasks(global_array, parameters, fp->p, rank, e);
                    else
-                       stealTasksFromTwo(local_queue, global_array, parameters, fp->p, rank, e);
+                       stealTasksFromTwo(global_array, parameters, fp->p, rank, e);
                }
             }
             return omp_get_wtime()-start_time;
@@ -630,9 +637,27 @@
         */
 
         void executeProgram(int create, struct Function_Parameters* function_Parameters, int execute,
-        int rep, struct Parameters* parameters){
+        int rep, struct Parameters* parameters, char * f){
             double execution_mean=0;
             double execution_time=0;
+            double min = 0;
+            double max = 0;
+            //Write into three files
+            char* filename = ".txt";
+            char* filenameMin = "min.txt";
+            char* filenameMax = "max.txt";
+            char * file = (char *) malloc(1 + strlen(f)+ strlen(filename) );
+            char * filemin = (char *) malloc(1 + strlen(f)+ strlen(filenameMin) );
+            char * filemax = (char *) malloc(1 + strlen(f)+ strlen(filenameMax) );
+            strcpy(file, f);
+            strcat(file, filename);
+            strcpy(filemin, f);
+            strcat(filemin, filenameMin);
+            strcpy(filemax, f);
+            strcat(filemax, filenameMax);
+            FILE *fp = fopen(file, "a");
+            FILE *fp_min = fopen(filemin, "a");
+            FILE *fp_max = fopen(filemax, "a");
             for(int i=0; i<rep; i++){
                 executed_tasks=0;
                 all_queues_empty = function_Parameters->p;
@@ -663,25 +688,25 @@
                     exit(EXIT_FAILURE);
                 }
                 execution_mean+=execution_time;
+                if(execution_time<min || min == 0){
+                    min = execution_time;
+                }
+                if(execution_time>max || max == 0){
+                    max = execution_time;
+                }
                 if(executed_tasks!=total_number_of_tasks){
-                    if (!(create == 1 && execute ==2)){
+                    if (!(create == 1 && (execute ==2||execute ==3||execute ==4||execute ==5))){
                         printf("The number of executed tasks (%d) does not match the required number (%d)\n", executed_tasks, total_number_of_tasks);
                         exit(EXIT_FAILURE);
                     }
-                }else{
-                    printf("Number of executed tasks: %d\n", executed_tasks);
+                }
+                if(all_queues_empty!=0){
+                    printf("A queue still has unfinished tasks!\n");
                 }
             }
-            int i=0;
-            if(function_Parameters->task_func_ptr == &vectorVectorSum){
-                i=1;
-            }else if(function_Parameters->task_func_ptr == &matrixVectorProduct){
-                i=2;
-            }else if(function_Parameters->task_func_ptr ==&matrixMatrixProduct){
-                i=3;
-            }
-            printf("Pattern: %d, WS: %d, T: %d, task: %d, m:%d, n:%d, execTime: %f \n", create, execute, function_Parameters->p, i,
-              function_Parameters->tasks, function_Parameters->input_size, (execution_mean/rep));
+            fprintf(fp, "%f, ", (execution_mean/rep));
+            fprintf(fp_min, "%f, ", min);
+            fprintf(fp_max, "%f, ", max);
         }
 
         //Original function is taken from Parallel Computing (184.710)
@@ -703,7 +728,7 @@
             * @param rep how often the program is executed
             * @param type kind of task
         */
-        void createParametersForProgramAndExecute(int create, int m, int n, int execute, int p, int rep, int type) {
+        void createParametersForProgramAndExecute(int create, int m, int n, int execute, int p, int rep, int type, char* f) {
             //Create task pointer here and input Params
             void (*task_func_ptr)(int, Parameters*,  int);
             int A_size=0;
@@ -745,7 +770,7 @@
             parameters->A=A;
             parameters->B=B;
             parameters->C=C;
-            executeProgram(create, function_Parameters, execute, rep, parameters);
+            executeProgram(create, function_Parameters, execute, rep, parameters, f);
             //print_vector(C, C_size, stdout);
             free_vector(A);
             free_vector(B);
@@ -766,14 +791,15 @@
             int n = -1;
             int execute = -1;
             int rep=-1;
-            if(argc!=15){
-                printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x");
+            char *f;
+            if(argc!=17){
+                printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x -f x");
                 exit(EXIT_FAILURE);
             }
             for(int i=1; i<argc; i+=2){
                 char* arg = argv[i];
-                if(atoi(argv[i+1])==0){
-                    printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x, parameters must be > 1");
+                if(atoi(argv[i+1])==0 && i!=15){
+                    printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x -f x, missing parameter after: %s", argv[i]);
                     exit(EXIT_FAILURE);
                 }
                 if(strcmp(arg, "-p")==0){
@@ -790,11 +816,13 @@
                     execute = atoi(argv[i+1]);
                 }else if(strcmp(arg, "-rep")==0){
                     rep = atoi(argv[i+1]);
+                }else if(strcmp(arg, "-f")==0){
+                    f = argv[i+1];
                 }else{
                     printf("\n|%s|\n", arg);
-                    printf("ERROR: libgomp-test -p x --create x --type x -m x -n x --execute x --rep x");
+                    printf("ERROR: libgomp-test -p x -create x -type x -m x -n x -execute x -rep x -f x");
                     exit(EXIT_FAILURE);
                 }
             }
-            createParametersForProgramAndExecute(create, m, n, execute, p, rep, type);
+            createParametersForProgramAndExecute(create, m, n, execute, p, rep, type, f);
         }
