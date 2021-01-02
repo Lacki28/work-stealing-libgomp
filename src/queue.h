@@ -23,10 +23,10 @@
         * @element start points to the starting address for executing tasks
         * @element input_size inputparameter for task
         * @element lock, lock head when adding tasks and tail when stealing
-                         - 0=unlocked, 1=head, lock>1=rank of thread with id lock-2 currently owns the lock
+                         -> 0=unlocked, 1=head, lock>1= thread with id = lock-2 currently owns the lock
         * @element next points to next node in DLL
         * @element prev points to prev node in DLL
-        * @element task points the task with has to executed by one thread
+        * @element task points the task which has to executed by one thread
     */
     struct Node {
         int start;
@@ -44,14 +44,12 @@
         * @element B pointer to vector or matrix
         * @element C pointer to vector or matrix - result of A (operation) B
         * @element start pointer to the beginning of the address, for a thread
-        * @element end pointer to the end of the address, for a thread
     */
     struct Parameters {
         double *A;
         double *B;
         double *C;
         int start;
-        int end;
     };
 
     /**
@@ -60,9 +58,7 @@
         * @element list_size size of its elements/nodes
         * @element head points to the first node
         * @element tail points to the last node
-        * @element next_queue only used for thread accessing other local queues
-        * @element prev_queue only used for thread accessing other local queues
-    */
+      */
     struct Queue {
         int list_size;
         struct Node* head;

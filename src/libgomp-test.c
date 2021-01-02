@@ -1,5 +1,4 @@
         #include "queue.h"
-        //#include "test.h" //Only used once, focus more on performance, therefore not necessary
 
         /**
         * @file libgomp-test.c
@@ -40,7 +39,6 @@
             params->B = NULL;
             params->C = NULL;
             params->start = 0;
-            params->end=0;
         }
 
         /**
@@ -111,6 +109,7 @@
             * @source original function is taken from https://riptutorial.com/openmp/example/23425/addition-of-two-vectors-using-openmp-parallel-for-construct
             * @param n size of the vectors
             * @param parameters struct with all details needed for execution of the task
+            * @param start pointer to the beginning of the address
          */
         void vectorVectorSum (int n, struct Parameters* parameters, int start){
             #pragma omp atomic update
@@ -125,6 +124,7 @@
             * @source original function is taken from https://www.appentra.com/parallel-computation-of-matrix-vector-product/
             * @param n size of the vector and the square matrix
             * @param parameters struct with all details needed for execution of the task
+            * @param start pointer to the beginning of the address
         */
         void matrixVectorProduct (int n, struct Parameters* parameters,  int start){
             #pragma omp atomic update
@@ -142,6 +142,7 @@
             * @source original function is taken from https://www.appentra.com/parallel-matrix-matrix-multiplication/
             * @param n size of the square matrices
             * @param parameters struct with all details needed for execution of the task
+            * @param start pointer to the beginning of the address
         */
         void matrixMatrixProduct(int n, struct Parameters* parameters,  int start){
             #pragma omp atomic update
@@ -198,6 +199,7 @@
                         exit(EXIT_FAILURE);
                     }
                 }
+                #pragma omp barrier
                 #pragma omp single
                    start_time = omp_get_wtime();
                 #pragma omp for
@@ -206,12 +208,15 @@
                     #pragma omp critical
                     {
                         currentNode = head_next;
-                        head_next = head_next->next;
+                        head_next = head_next->prev;
                     }
                     #pragma omp atomic update
                         queue->list_size=queue->list_size-1;
                     (* currentNode->task)(currentNode->input_size, parameters, currentNode->start); //execute task
+
                 }
+                #pragma omp master
+                    all_queues_empty=0;
             }
             return omp_get_wtime()-start_time;
         }
@@ -238,18 +243,17 @@
 
         /**
             * @brief execute tasks
-            * @details execute tasks and free the nodes afterwards - not thread safe
+            * @details execute tasks - not thread safe
             * @param queue where the tasks are saved
             * @param iteration_end amount of tasks to be executed
-            * @param input_size parameter for tasks
             * @param parameters input for the tasks
         */
         void executeTasks(struct Queue* queue, int iteration_end, struct Parameters* parameters){
             struct Node* head_next = queue->head;
-            for (int i=0;i<iteration_end;i++){
+            while (queue->list_size>0){
                 struct Node* currentNode;
                 currentNode = head_next;
-                head_next = head_next->next;
+                head_next = head_next->prev;
                 (* currentNode->task)(currentNode->input_size, parameters, currentNode->start); //execute task
                 queue->list_size=queue->list_size-1;
             }
@@ -299,9 +303,12 @@
                         exit(EXIT_FAILURE);
                     }
                 }
+                #pragma omp barrier
                 #pragma omp single
                     start_time = omp_get_wtime();
                 executeTasks(local_queue, iteration_end, parameters);
+                #pragma omp atomic update
+                    all_queues_empty--;
             }
             return omp_get_wtime()-start_time;
         }
@@ -348,7 +355,7 @@
                 int steal_size=1;
                 int thread_to_steal_from1 =  rand() % p;
                 int thread_to_steal_from2 =  rand() % p;
-                int max_queue=0;
+                int max_queue=thread_to_steal_from2;
                 if(global_array[thread_to_steal_from1].list_size>=global_array[thread_to_steal_from2].list_size){
                     max_queue=thread_to_steal_from1;
                 }
@@ -408,6 +415,7 @@
                         exit(EXIT_FAILURE);
                     }
                 }
+                #pragma omp barrier
                 #pragma omp single
                     start_time = omp_get_wtime();
                 while(local_queue->list_size>0){
@@ -440,7 +448,7 @@
                 return pattern2WithWorkStealing(global_array, function_Parameters, parameters, e);
             }else{
                 exit(EXIT_FAILURE);
-                }
+            }
         }
 
 
@@ -464,7 +472,7 @@
                 }
                 #pragma omp atomic update
                     total_number_of_tasks+=1;
-                current_Node=current_Node->next;
+                current_Node=current_Node->prev;
             }
         }
 
@@ -535,9 +543,12 @@
                    } //split tasks
                    doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
                }
+               #pragma omp barrier
                #pragma omp single
                    start_time = omp_get_wtime();
                executeTasks(local_queue, iteration_end, parameters);
+               #pragma omp atomic update
+                    all_queues_empty--;
             }
             return omp_get_wtime()-start_time;
         }
@@ -589,6 +600,7 @@
                    //start executing and stealing
                    doubleTasksRecursively(local_queue, fp->input_size, parameters, start, fp->task_func_ptr);
                }
+               #pragma omp barrier
                #pragma omp single
                    start_time = omp_get_wtime();
                if(iteration_end!=0){
@@ -634,6 +646,7 @@
             * @param execute specify whether work stealing is used
             * @param rep how often the program is executed
             * @param parameters input for the tasks
+            * @param f name of outputfile
         */
 
         void executeProgram(int create, struct Function_Parameters* function_Parameters, int execute,
@@ -709,15 +722,6 @@
             fprintf(fp_max, "%f, ", max);
         }
 
-        //Original function is taken from Parallel Computing (184.710)
-            void print_vector(double* m, int n, FILE *out) {
-              for(int i=0; i<n; i++) {
-                  fprintf(out, "%8.4f ", m[i]);
-              }
-              printf("%d", omp_get_thread_num());
-              fprintf(out, "\n");
-            }
-
         /**
             * @brief create parameters for the program and execute it
             * @param create specify which pattern will be used
@@ -727,6 +731,7 @@
             * @param p amount of threads that execute the program
             * @param rep how often the program is executed
             * @param type kind of task
+            * @param f name of outputfile
         */
         void createParametersForProgramAndExecute(int create, int m, int n, int execute, int p, int rep, int type, char* f) {
             //Create task pointer here and input Params
@@ -771,7 +776,6 @@
             parameters->B=B;
             parameters->C=C;
             executeProgram(create, function_Parameters, execute, rep, parameters, f);
-            //print_vector(C, C_size, stdout);
             free_vector(A);
             free_vector(B);
             free_vector(C);

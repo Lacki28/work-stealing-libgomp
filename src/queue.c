@@ -28,13 +28,13 @@
             new_node->lock=0;
             new_node->start=start;
             new_node->task=task;
-            new_node->prev = NULL;
+            new_node->next = NULL;
             if(queue->head==NULL){
-                new_node->next = NULL;
+                new_node->prev = NULL;
                 queue->tail = new_node;
             }else{
-                (queue->head)->prev = new_node;
-                new_node->next = queue->head;
+                (queue->head)->next = new_node;
+                new_node->prev = queue->head;
             }
             queue->head = new_node;
             queue->list_size = queue->list_size+1;
@@ -42,7 +42,7 @@
 
         /**
             * @brief add new node in critical section
-            * @details insert a new node on the front of the list, lock head, so that no other thread can access it while inserting new tasks
+            * @details insert a new node at the beginning of the list, lock head so that no other thread can access it while inserting new tasks
             * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
             * @param queue queue to which the new node is added
             * @param task points to a task stored in the node
@@ -59,18 +59,18 @@
             new_node->start=start;
             new_node->task=task;
             new_node->lock=1;
-            new_node->prev = NULL;
+            new_node->next = NULL;
             if(queue->head==NULL){
-                new_node->next = NULL;
+                new_node->prev = NULL;
                 queue->tail = new_node;
             }else{
-                (queue->head)->prev = new_node;
-                new_node->next = queue->head;
+                (queue->head)->next = new_node;
+                new_node->prev = queue->head;
             }
             queue->head = new_node;
-            if(queue->head->next!=NULL){ //unset lock of last head, so that it can be stolen
+            if(queue->head->prev!=NULL){ //unset lock of last head, so that it can be stolen
                 #pragma omp atomic write
-                queue->head->next->lock=0;
+                queue->head->prev->lock=0;
             }
             #pragma omp atomic update
             queue->list_size = queue->list_size+1;
@@ -79,7 +79,7 @@
 
         /**
             * @brief add new node in critical section
-            * @details insert a new node on the front of the list, lock head, so that no other thread can access it while inserting new tasks
+            * @details insert a new node at the beginning of the list, lock head so that no other thread can access it while inserting new tasks
             * @source original structure taken from https://www.geeksforgeeks.org/doubly-linked-list/
             * @param queue into which the node will be inserted
             * @param node before which the new one is inserted
@@ -109,15 +109,15 @@
             }
             new_node->task=node->task;
             new_node->lock=0;
-            new_node->prev = node->prev;
-            new_node->next=node;
+            new_node->next = node->next;
+            new_node->prev=node;
             if(node==queue->head){
                 queue->head=new_node;
             }
             else{
-                node->prev->next=new_node;
+                node->next->prev=new_node;
             }
-            node->prev=new_node;
+            node->next=new_node;
             #pragma omp atomic update
                 queue->list_size = queue->list_size+1;
         }
@@ -150,39 +150,39 @@
                      int locked;
                      for(;stolen_tasks<steal_size && stolen_tasks<list_size;stolen_tasks++){
                          #pragma omp atomic write
-                             locked = helpNode->prev->lock;
+                             locked = helpNode->next->lock;
                          if(locked==1){
                             #pragma omp atomic write
                                helpNode->lock=1;
                             break;
                          }
-                         helpNode=helpNode->prev;
+                         helpNode=helpNode->next;
                      }
                      #pragma omp atomic write
                      queue->list_size = (queue->list_size)-stolen_tasks;
                      if(queue->list_size!=0){
-                         helpNode->next->prev=NULL; //separate both
-                         helpNode->next=NULL;
+                         helpNode->prev->next=NULL; //separate both
+                         helpNode->prev=NULL;
                          queue->tail=helpNode;
                      }
                      #pragma omp atomic write
                          queue->tail->lock=0;
                      while(old_tail!=NULL){
                          (* old_tail->task)(old_tail->input_size, parameters, old_tail->start); //execute task
-                         old_tail=old_tail->prev;
+                         old_tail=old_tail->next;
                      }
                 }
-            }else if(head==1 && queue->head->next == NULL && queue->head->lock==1){
+            }else if(head==1 && queue->head->prev == NULL && queue->head->lock==1){
                 #pragma omp atomic update
                     queue->list_size--;
                 (* queue->head->task)(queue->head->input_size, parameters, queue->head->start); //execute task
             } else if(head==1){
                  #pragma omp atomic write
-                    queue->head->next->lock=1;
+                    queue->head->prev->lock=1;
                  struct Node* workNode = queue->head;
                  #pragma omp atomic write
-                    queue->head=queue->head->next;
-                    queue->head->prev=NULL;
+                    queue->head=queue->head->prev;
+                    queue->head->next=NULL;
                  #pragma omp atomic update
                     queue->list_size--;
                  (* workNode->task)(workNode->input_size, parameters, workNode->start); //execute task
